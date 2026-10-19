@@ -1,0 +1,95 @@
+function _config_path(base, raw)
+    value = replace(String(raw), r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}" => match -> begin
+        name = match[3:end-1]
+        haskey(ENV, name) || throw(ArgumentError("environment variable $name is not set"))
+        ENV[name]
+    end)
+    isabspath(value) ? normpath(value) : normpath(joinpath(base, value))
+end
+
+function _reject_unknown(section, allowed, label)
+    unknown = setdiff(Set(keys(section)), Set(String.(allowed)))
+    isempty(unknown) || throw(ArgumentError("unknown $label settings: $(join(sort!(collect(unknown)), ", "))"))
+end
+
+"""Load and preflight a TOML fit profile without creating output or launching Julia."""
+function load_fit_config(path::AbstractString)
+    raw = TOML.parsefile(path)
+    base = dirname(abspath(path))
+    _reject_unknown(raw, ["launcher", "search", "parameters", "metrics", "scoring"], "top-level")
+    launcher = copy(raw["launcher"])
+    _reject_unknown(launcher, fieldnames(LauncherConfig), "launcher")
+    for key in ("project_dir", "base_config", "advanced_cli", "output_dir", "input_base_dir")
+        haskey(launcher, key) && (launcher[key] = _config_path(base, launcher[key]))
+    end
+    if haskey(launcher, "julia_bin")
+        value = String(launcher["julia_bin"])
+        # A bare command is resolved via PATH; paths and environment placeholders are config-relative.
+        launcher["julia_bin"] = occursin(r"[/\\$]", value) ? _config_path(base, value) : value
+    end
+    haskey(launcher, "output_dir") || (launcher["output_dir"] = joinpath(base, "runs", "launcher"))
+    config = LauncherConfig(; (Symbol(k) => v for (k,v) in launcher)...)
+    search = copy(get(raw, "search", Dict{String,Any}()))
+    _reject_unknown(search, vcat(collect(String.(fieldnames(SearchOptions))), ["start_day", "step_days", "end_day"]), "search")
+    if haskey(search, "horizons")
+        any(haskey(search, k) for k in ("start_day", "step_days", "end_day")) &&
+            throw(ArgumentError("use horizons OR start_day/step_days/end_day"))
+    else
+        search["horizons"] = day_horizons(; (Symbol(k) => pop!(search, k)
+            for k in ("start_day", "step_days", "end_day") if haskey(search, k))...)
+    end
+    search["checkpoint_dir"] = haskey(search, "checkpoint_dir") ?
+        _config_path(base, search["checkpoint_dir"]) : joinpath(config.output_dir, "checkpoints")
+    options = SearchOptions(; (Symbol(k) => v for (k,v) in search)...)
+    parameters = Parameter[]
+    paths = Dict{Symbol,String}()
+    integers = Symbol[]
+    for item in raw["parameters"]
+        _reject_unknown(item, ["name", "path", "lower", "upper", "scale", "integer"], "parameter")
+        name = Symbol(get(item, "name", item["path"]))
+        push!(parameters, Parameter(name, item["lower"], item["upper"]; scale=Symbol(get(item, "scale", "linear"))))
+        paths[name] = String(item["path"])
+        get(item, "integer", false) && push!(integers, name)
+    end
+    _validate(parameters, options)
+    targets = MetricTarget[]
+    for item in raw["metrics"]
+        _reject_unknown(item, ["name", "file", "weight", "scale"], "metric")
+        push!(targets, MetricTarget(item["name"], load_observations(_config_path(base, item["file"]));
+                                   weight=get(item, "weight", 1), scale=get(item, "scale", nothing)))
+    end
+    scoring = get(raw, "scoring", Dict{String,Any}())
+    _reject_unknown(scoring, ["smoothing_days"], "scoring")
+    evaluator = LauncherEvaluator(config, paths, targets;
+        smoothing_days=get(scoring, "smoothing_days", 7), integer_parameters=integers)
+    # Detect an unusable first horizon without paying for a simulation.
+    for target in targets
+        any(!ismissing(_smooth_at(target.observed, day, evaluator.smoothing_days))
+            for day in 1:min(first(options.horizons), length(target.observed))) ||
+            throw(ArgumentError("$(target.name) has no usable observations at the first horizon"))
+    end
+    (evaluator=evaluator, parameters=parameters, options=options)
+end
+
+"""Fit a launcher TOML profile and export the best full-horizon JSON configuration."""
+function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractString}=nothing)
+    fit = load_fit_config(path)
+    finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options, resume_from=resume_from)
+    best = first(finalists)
+    isfinite(best.score) || error("all final candidates failed; inspect evaluation.json and launcher logs")
+    stage_path = joinpath(fit.options.checkpoint_dir,
+        "stage_$(lpad(length(fit.options.horizons), 3, '0'))_day_$(best.horizon).jls")
+    checkpoint = resume_from !== nothing && !isfile(stage_path) ? load_checkpoint(resume_from) : load_checkpoint(stage_path)
+    candidate = render_candidate(fit.evaluator, best.values, best.horizon, first(checkpoint.replicate_seeds))
+    mkpath(fit.evaluator.config.output_dir)
+    _write_json(joinpath(fit.evaluator.config.output_dir, "best_config.json"), candidate)
+    _write_json(joinpath(fit.evaluator.config.output_dir, "fit_result.json"),
+        Dict("score" => best.score, "horizon" => best.horizon,
+             "values" => Dict(String(k) => v for (k,v) in best.values),
+             "replicate_scores" => best.replicate_scores,
+             "replicate_seeds" => checkpoint.replicate_seeds,
+             "tolerance_met" => checkpoint.tolerance_met,
+             "score_tolerance" => fit.options.score_tolerance,
+             "best_config_seed" => first(checkpoint.replicate_seeds)))
+    finalists
+end

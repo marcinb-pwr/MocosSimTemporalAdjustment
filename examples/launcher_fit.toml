@@ -1,0 +1,65 @@
+# Paths are relative to this TOML file. ${VARIABLE} placeholders are expanded.
+[launcher]
+project_dir = "${MOCOSSIM_LAUNCHER_DIR}"
+base_config = "${MOCOSSIM_SEED_CONFIG}"
+# Optional: julia_bin = "/absolute/path/to/julia-1.7.0/bin/julia"
+# Input paths inside the seed JSON are relative to the seed JSON's directory.
+# Set input_base_dir explicitly if the seed was authored relative to another directory.
+output_dir = "../runs/launcher-fit"
+threads = 4
+num_trajectories = 1
+timeout_seconds = 3600.0
+compiled_modules = true
+# Keep optional summary output off for the pinned launcher/MocosSim pair.
+write_summary = false
+
+[search]
+start_day = 14
+step_days = 14
+end_day = 84
+# Alternatively: horizons = [14, 28, 56, 84] (remove the three day settings above).
+survivors = 12
+random_starts = 48
+trials_per_survivor = 8
+repetitions = 3
+max_rounds_per_horizon = 5
+score_tolerance = 0.20
+require_tolerance = true
+initial_radius = 0.20
+radius_decay = 0.75
+min_separation = 0.03
+seed = 42
+checkpoint_dir = "../runs/launcher-fit/checkpoints"
+
+[scoring]
+# Both observations and predictions use trailing averages. 1 disables smoothing.
+smoothing_days = 7
+
+[[parameters]]
+name = "school"
+path = "transmission_probabilities.school"
+lower = 0.05
+upper = 0.30
+
+[[parameters]]
+name = "class"
+path = "transmission_probabilities.class"
+lower = 0.10
+upper = 0.40
+
+[[parameters]]
+name = "age_coupling"
+path = "transmission_probabilities.age_coupling_param"
+lower = 0.30
+upper = 0.80
+
+[[metrics]]
+name = "daily_detections"
+file = "${MOCOSSIM_GT_DIR}/daily_detections.csv"
+weight = 1.0
+# Optional fixed normalization: scale = 100.0
+
+[[metrics]]
+name = "daily_deaths"
+file = "${MOCOSSIM_GT_DIR}/daily_deaths.csv"
+weight = 1.0

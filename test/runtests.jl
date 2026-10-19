@@ -26,6 +26,8 @@ using Test
     @test getfield.(checkpoint.survivors, :score) == getfield.(result, :score)
 end
 
+include("launcher.jl")
+
 @testset "validation and failed simulations" begin
     @test_throws ArgumentError Parameter(:bad, 0, 1; scale=:log)
     options = SearchOptions(horizons=[2], survivors=1, random_starts=2,
