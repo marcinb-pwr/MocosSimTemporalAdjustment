@@ -139,6 +139,9 @@ end
 """Load a stage checkpoint produced by [`temporal_search`](@ref)."""
 load_checkpoint(path::AbstractString) = open(deserialize, path)
 
+# Adapters may provide actionable diagnostics without coupling the search to their I/O.
+_evaluation_failure_hint(evaluator, horizon) = ""
+
 """
     temporal_search(evaluator, parameters; options=SearchOptions(), initial=[], resume_from=nothing)
 
@@ -219,8 +222,15 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                  survivors=survivors, options=options, parameters=parameters)
         _save_checkpoint(joinpath(options.checkpoint_dir,
                                   "stage_$(lpad(stage, 3, '0'))_day_$(horizon).jls"), state)
-        accepted || error("Score tolerance $(options.score_tolerance) not reached at day $horizon " *
-                          "after $rounds rounds (best=$(first(survivors).score)); checkpoint saved")
+        if !accepted
+            if !isfinite(first(survivors).score)
+                error("All candidate evaluations failed at day $horizon; checkpoint saved. " *
+                      "This is an evaluation failure, not a score-tolerance mismatch." *
+                      _evaluation_failure_hint(evaluator, horizon))
+            end
+            error("Score tolerance $(options.score_tolerance) not reached at day $horizon " *
+                  "after $rounds rounds (best=$(first(survivors).score)); checkpoint saved")
+        end
         radius = next_radius
     end
 

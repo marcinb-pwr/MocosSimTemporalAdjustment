@@ -99,7 +99,7 @@ using JSON, JLD2
 config = JSON.parsefile(ARGS[1])
 mode = get(config, "fixture_mode", "ok")
 mode == "timeout" && sleep(30)
-mode == "exit" && exit(3)
+mode == "exit" && (println(stderr, "fixture launcher dependency error"); exit(3))
 mode == "missing" && exit(0)
 daily = ARGS[findfirst(==("--output-daily"), ARGS)+1]
 summary_idx = findfirst(==("--output-summary"), ARGS)
@@ -155,6 +155,22 @@ end
             failure_report = JSON.parsefile(joinpath(only(readdir(failure_config.output_dir; join=true)), "evaluation.json"))
             @test failure_report["status"] == "failed"
             mode == "timeout" && @test failure_report["timed_out"]
+            if mode == "exit"
+                # All-failed candidates must surface the launcher error rather than suggest a looser tolerance.
+                options = SearchOptions(horizons=[2], random_starts=1, survivors=1,
+                    score_tolerance=0.2, checkpoint_dir=joinpath(directory, "failed-checkpoint"))
+                err = try
+                    temporal_search(failure, [Parameter(:school, 0, 1)]; options=options)
+                    nothing
+                catch exception
+                    exception
+                end
+                @test err isa ErrorException
+                message = sprint(showerror, err)
+                @test occursin("All candidate evaluations failed", message)
+                @test occursin("fixture launcher dependency error", message)
+                @test occursin("evaluation.json", message)
+            end
         end
         delete!(seed, "fixture_mode")
         MTA._write_json(seed_path, seed)

@@ -1,4 +1,6 @@
 # Run under the LAUNCHER project: population DataFrames must match its dependency versions.
+# Load the launcher now so missing simulator dependencies fail visibly before the search.
+using MocosSimLauncher
 using DataFrames
 using JLD2
 using JSON

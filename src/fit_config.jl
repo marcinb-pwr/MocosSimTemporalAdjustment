@@ -76,7 +76,8 @@ function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractS
     fit = load_fit_config(path)
     finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options, resume_from=resume_from)
     best = first(finalists)
-    isfinite(best.score) || error("all final candidates failed; inspect evaluation.json and launcher logs")
+    isfinite(best.score) || error("All final candidates failed." *
+                                 _evaluation_failure_hint(fit.evaluator, best.horizon))
     stage_path = joinpath(fit.options.checkpoint_dir,
         "stage_$(lpad(length(fit.options.horizons), 3, '0'))_day_$(best.horizon).jls")
     checkpoint = resume_from !== nothing && !isfile(stage_path) ? load_checkpoint(resume_from) : load_checkpoint(stage_path)

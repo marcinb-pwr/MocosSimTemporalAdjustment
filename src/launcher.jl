@@ -263,6 +263,39 @@ function _write_json(path, value)
     end
 end
 
+function _evaluation_failure_hint(evaluator::LauncherEvaluator, horizon)
+    root = evaluator.config.output_dir
+    isdir(root) || return "\nLauncher output directory: $root"
+    reports = filter(path -> isdir(path) && isfile(joinpath(path, "evaluation.json")),
+                     readdir(root; join=true))
+    sort!(reports; by=path -> mtime(joinpath(path, "evaluation.json")), rev=true)
+    for directory in reports
+        report = try JSON.parsefile(joinpath(directory, "evaluation.json")) catch; continue end
+        get(report, "horizon", nothing) == horizon || continue
+        get(report, "status", "") == "failed" || continue
+        detail = get(report, "error", "unknown launcher failure")
+        lines = String["", "Launcher failure: $detail",
+            "Report: $(joinpath(directory, "evaluation.json"))",
+            "Stderr: $(joinpath(directory, "stderr.log"))"]
+        log = joinpath(directory, "stderr.log")
+        if isfile(log)
+            contents = readlines(log)
+            if !isempty(contents)
+                push!(lines, "Launcher stderr:")
+                if length(contents) > 40
+                    append!(lines, contents[1:20])
+                    push!(lines, "[... middle of stderr omitted; see the full log above ...]")
+                    append!(lines, contents[end-19:end])
+                else
+                    append!(lines, contents)
+                end
+            end
+        end
+        return join(lines, "\n")
+    end
+    "\nLauncher output directory: $root"
+end
+
 function _launcher_command(config, config_path, daily_path, summary_path)
     args = [config.julia_bin, "--startup-file=no", "--project=$(config.project_dir)",
             "--threads=$(config.threads)"]

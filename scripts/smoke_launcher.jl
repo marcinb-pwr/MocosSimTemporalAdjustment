@@ -15,7 +15,9 @@ else
 end
 println("Smoke test output: ", directory)
 println("Julia version: ", VERSION)
-println("Generating a six-person population using the launcher environment...")
+println("Checking launcher dependencies and generating a six-person population...")
+println("If dependencies are missing, run: julia --project=", repr(launcher_dir),
+        " -e 'using Pkg; Pkg.instantiate(); using MocosSimLauncher'")
 julia = joinpath(Sys.BINDIR, Base.julia_exename())
 fixture_script = joinpath(@__DIR__, "make_smoke_inputs.jl")
 run(`$julia --startup-file=no --project=$launcher_dir $fixture_script $directory`)

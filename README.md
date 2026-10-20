@@ -45,6 +45,18 @@ julia --project=MocosSimTemporalAdjustment MocosSimTemporalAdjustment/scripts/sm
 
 ## Fit your own data
 
+If a smoke test reports that `MocosSim` is not installed, instantiate the
+**launcher** project with the same Julia executable and `JULIA_DEPOT_PATH`:
+
+```sh
+julia --project=/absolute/path/to/MocosSimLauncher -e 'using Pkg; Pkg.instantiate(); using MocosSimLauncher'
+```
+
+Instantiating the optimizer does not install the launcher's separate dependencies.
+The smoke test checks that the launcher loads before starting the search. Runtime
+failures include the evaluation report path and launcher stderr in the error.
+Run the relative commands below from the repository root, not `examples/`.
+
 From the MocosSimTemporalAdjustment repository:
 
 ```sh
