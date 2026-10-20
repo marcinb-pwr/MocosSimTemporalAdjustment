@@ -3,6 +3,7 @@ module MocosSimTemporalAdjustment
 using Random
 using Serialization
 using Statistics
+using CodecZlib
 using JSON
 using JLD2
 using TOML

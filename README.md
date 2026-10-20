@@ -176,6 +176,10 @@ implicit CSV filename aliases: `file` always names the actual source.
 
 ## Outputs, failures and resume
 
+For the Saxony `UnderObservation` quarantine assertion or `Healthy` forward
+tracing assertion, see [the model regression fix](docs/saxony-reinfection-fix.md).
+The fix must be installed in the launcher environment.
+
 Each adapter invocation retains its effective `config_candidate.json`,
 `output_daily.jld2`, `stdout.log`, `stderr.log` and
 `evaluation.json`. The adapter sets `stop_simulation_time`, `params_seed`,

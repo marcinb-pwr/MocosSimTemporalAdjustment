@@ -47,7 +47,7 @@ const MTA = MocosSimTemporalAdjustment
 end
 
 function write_daily(path, values; metric="daily_detections", count=1)
-    jldopen(path, "w") do file
+    jldopen(path, "w"; compress=true) do file
         for id in 1:count
             group = JLD2.Group(file, string(id))
             group[metric] = values
@@ -78,6 +78,10 @@ end
         write_daily(path, [1.,2.]; count=2)
         @test_throws ErrorException score_daily(path, [target2], 2)
         @test score_daily(path, [target2], 2; smoothing_days=1, expected_trajectories=2).score == 0
+        # Real launcher outputs use DEFLATE compression, unlike the old synthetic fixture.
+        compressed = fill(2.0, 1000)
+        write_daily(path, compressed)
+        @test score_daily(path, [MetricTarget("daily_detections", compressed)], 28).score == 0
         write(csv, "day,value\n1,2\n1,3\n")
         @test_throws ArgumentError load_observations(csv)
         @test_throws ArgumentError MetricTarget("x", [NaN])
