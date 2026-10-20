@@ -55,7 +55,7 @@ julia --project=/absolute/path/to/MocosSimLauncher -e 'using Pkg; Pkg.instantiat
 Instantiating the optimizer does not install the launcher's separate dependencies.
 The smoke test checks that the launcher loads before starting the search. Runtime
 failures include the evaluation report path and launcher stderr in the error.
-Run the relative commands below from the repository root, not `examples/`.
+Run the relative commands below from the repository root, not `experiments/`.
 
 From the MocosSimTemporalAdjustment repository:
 
@@ -64,9 +64,9 @@ export MOCOSSIM_LAUNCHER_DIR=/absolute/path/to/MocosSimLauncher
 export MOCOSSIM_SEED_CONFIG=/absolute/path/to/working-launcher-config.json
 export MOCOSSIM_GT_DIR=/absolute/path/to/observations
 
-# Edit examples/launcher_fit.toml before running.
-julia --project=. scripts/fit_launcher.jl examples/launcher_fit.toml --check
-julia --project=. scripts/fit_launcher.jl examples/launcher_fit.toml
+# Edit experiments/saxony_baseline.toml before running.
+julia --project=. scripts/fit_launcher.jl experiments/saxony_baseline.toml --check
+julia --project=. scripts/fit_launcher.jl experiments/saxony_baseline.toml
 ```
 
 `--check` validates the profile, mappings, input paths and observations without
@@ -211,7 +211,7 @@ RNG state, radius, number of rounds and tolerance status. Resume **after an
 accepted stage** with identical search options and parameters:
 
 ```sh
-julia --project=. scripts/fit_launcher.jl examples/launcher_fit.toml --resume runs/launcher-fit/checkpoints/stage_003_day_42.jls
+julia --project=. scripts/fit_launcher.jl experiments/saxony_baseline.toml --resume runs/launcher-fit/checkpoints/stage_003_day_42.jls
 ```
 
 Keep launcher version, seed JSON, observations and scoring settings unchanged
