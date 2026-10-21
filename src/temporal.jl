@@ -25,7 +25,22 @@ Base.isequal(a::TemporalParameter, b::TemporalParameter) =
 Base.:(==)(a::TemporalParameter, b::TemporalParameter) = isequal(a, b)
 
 _temporal_name(t, index) = Symbol(t.name, "_", index)
-_temporal_index(t, horizon) = searchsortedlast(t.times, horizon) + 1
+# Output day d represents event times [d-1,d). The scored prefix ends just
+# before horizon; at a breakpoint fit the interval ending there, not the next.
+_temporal_index(t, horizon) = searchsortedfirst(t.times, horizon)
+
+const TEMPORAL_INTERVAL_POLICY = "scored_prefix_v2"
+
+function _check_temporal_interval_policy(saved, temporal, horizons)
+    isempty(temporal) && return
+    policy = get(saved,:temporal_interval_policy,"horizon_time_v1")
+    policy == TEMPORAL_INTERVAL_POLICY && return
+    # The old rule was identical when no scheduled horizon hit a breakpoint.
+    policy == "horizon_time_v1" &&
+        !any(h in t.times for h in horizons for t in temporal) && return
+    throw(ArgumentError("checkpoint uses an older temporal interval policy at horizon boundaries; " *
+        "start a fresh experiment or use warm_start_from (which retains its historical values)"))
+end
 
 """Hard adjacent-value limit and soft jump/curvature and reversal penalties."""
 struct TemporalControls

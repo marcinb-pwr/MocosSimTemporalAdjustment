@@ -64,6 +64,8 @@ function validate_launcher(path::AbstractString, checkpoint::AbstractString;
     _write_json(joinpath(directory,"validation_result.json"),Dict(
         "kind"=>"fresh-seed validation","profile"=>abspath(path),
         "checkpoint"=>abspath(checkpoint),"horizon"=>saved.horizon,
+        "temporal_interval_policy"=>TEMPORAL_INTERVAL_POLICY,
+        "training_temporal_interval_policy"=>get(saved,:temporal_interval_policy,"horizon_time_v1"),
         "repetitions"=>repetitions,"validation_seed"=>seed,"replicate_seeds"=>seeds,
         "excluded_checkpoint_seeds"=>saved.replicate_seeds,
         "score_tolerance"=>score_tolerance,"candidates"=>rows))

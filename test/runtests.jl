@@ -30,6 +30,7 @@ include("launcher.jl")
 include("execution.jl")
 include("temporal.jl")
 include("temporal_controls.jl")
+include("temporal_boundaries.jl")
 include("validation.jl")
 
 @testset "validation and failed simulations" begin

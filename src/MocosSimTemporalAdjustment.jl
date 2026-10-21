@@ -207,6 +207,7 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
         hasproperty(saved, :schema_version) && saved.schema_version == 1 ||
             throw(ArgumentError("checkpoint does not support exact resume"))
         if warm_start_from === nothing
+            _check_temporal_interval_policy(saved,temporal,options.horizons)
             isequal(saved.parameters, parameters) || throw(ArgumentError("resume parameters differ; use warm_start_from to add temporal vectors"))
             isequal(get(saved, :temporal, TemporalParameter[]), temporal) ||
                 throw(ArgumentError("resume temporal definitions differ"))
@@ -297,7 +298,8 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                  next_radius=next_radius, rng=deepcopy(rng), rounds=rounds,
                  replicate_seeds=seeds, tolerance_met=met, accepted=accepted,
                  survivors=survivors, options=options, parameters=parameters)
-        isempty(temporal) || (state = merge(state, (temporal=temporal,temporal_controls=temporal_controls)))
+        isempty(temporal) || (state = merge(state, (temporal=temporal,temporal_controls=temporal_controls,
+            temporal_interval_policy=TEMPORAL_INTERVAL_POLICY)))
         warm_start_from === nothing || (state = merge(state, (warm_start_from=abspath(warm_start_from),)))
         _save_checkpoint(joinpath(options.checkpoint_dir,
                                   "stage_$(lpad(stage, 3, '0'))_day_$(horizon).jls"), state)

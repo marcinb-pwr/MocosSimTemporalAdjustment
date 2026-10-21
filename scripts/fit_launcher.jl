@@ -16,6 +16,7 @@ if length(ARGS) == 2
     println("Threads per launcher: ", fit.evaluator.config.threads)
     println("Temporal fitting: ", isempty(fit.temporal) ? "disabled" : "enabled")
     isempty(fit.temporal) || println("Temporal constraints: ",fit.temporal_controls)
+    isempty(fit.temporal) || println("Temporal interval policy: ",MocosSimTemporalAdjustment.TEMPORAL_INTERVAL_POLICY)
     for t in fit.temporal, day in fit.options.horizons
         i = MocosSimTemporalAdjustment._temporal_index(t, day)
         println("Day $day: $(t.name) interval_values[$i]")

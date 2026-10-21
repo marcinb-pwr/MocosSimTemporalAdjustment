@@ -122,6 +122,7 @@ function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractS
             "disabled (no [[temporal_parameters]] entries)" :
             join(string.(getfield.(fit.temporal, :name)), ", "))
         isempty(fit.temporal) || println(stderr,"Temporal constraints: ",fit.temporal_controls)
+        isempty(fit.temporal) || println(stderr,"Temporal interval policy: ",TEMPORAL_INTERVAL_POLICY)
     end
     finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options,
                                resume_from=resume_from, warm_start_from=warm_start_from,

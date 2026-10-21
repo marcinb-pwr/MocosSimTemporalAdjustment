@@ -247,18 +247,21 @@ breakpoints come from the launcher's seed JSON; they are not replaced with a new
 grid. The modulation must be `IntervalsModulations`, with `weight_days=1` and
 both case/death weights zero, so that its input is the simulation day.
 
-MocosSim uses `searchsortedlast(interval_times, day) + 1` (one-based indexing):
+MocosSim selects an event's interval with `searchsortedlast(interval_times, time) + 1`.
+Launcher output day `d` bins event times `[d-1,d)`, so a horizon `H` scores
+`[0,H)`. The fitter selects the interval containing the end of that scored
+prefix, using `searchsortedfirst(interval_times, H)` (one-based indexing):
 
 | Horizon | Active interval with 30-day breakpoints | Fitted vector entry |
 | --- | --- | --- |
-| 14, 28 | `[0,30)` | `interval_values[1]` |
-| 42, 56 | `[30,60)` | `interval_values[2]` |
-| 60, 70, 84 | `[60,90)` | `interval_values[3]` |
-| 90 | `[90,120)` | `interval_values[4]` |
+| 14, 28, 30 | `[0,30)` | `interval_values[1]` |
+| 42, 56, 60 | `[30,60)` | `interval_values[2]` |
+| 70, 84, 90 | `[60,90)` | `interval_values[3]` |
+| 120 | `[90,120)` | `interval_values[4]` |
 
-Only the interval containing the **current horizon** is changed, even if a stage
-spans several intervals. At an exact boundary the new interval is active,
-matching the simulator. Earlier entries remain frozen within each survivor's
+Only the interval containing the **last scored event times** is changed, even if
+a stage spans several intervals. At an exact boundary it is the interval ending
+there: the interval starting there contributes to output day `H+1`. Earlier entries remain frozen within each survivor's
 history; future entries retain baseline values until their interval becomes
 active. A new random proposal inherits one survivor's history and randomizes
 only its active temporal entries and scalar parameters. Mutations also change
@@ -322,6 +325,15 @@ experiment, use `--warm-start` with its accepted checkpoint and identical
 temporal definitions. That preserves earlier fitted entries; it does not repair
 old historical jumps retroactively. It assumes
 the same launcher/model, observations and remaining seed configuration.
+
+Temporal checkpoints now record `temporal_interval_policy = "scored_prefix_v2"`.
+Older code selected the next interval when a horizon exactly matched a
+breakpoint, although that interval was outside the scored prefix. Exact resume
+rejects such old checkpoints when their schedule includes boundaries; start a
+fresh experiment for consistent historical fitting, or explicitly warm start
+with the understanding that previously frozen history is retained. Old schedules
+without exact boundary hits, such as 14/28/42/56/70/84 on a 30-day grid, retain
+their previous selection and can still resume with otherwise identical settings.
 
 If warm starting a checkpoint that failed its original tolerance, the fitter
 retries that same horizon with its survivors and original radius. It never skips

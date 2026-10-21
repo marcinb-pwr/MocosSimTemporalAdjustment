@@ -5,7 +5,7 @@
     scalar = [Parameter(:school, 0, 1)]
     parameters = vcat(scalar, MTA._temporal_parameters(temporal))
     @test [MTA._temporal_index(first(temporal), h) for h in [14,28,30,42,60,84,90,600]] ==
-        [1,1,2,2,3,3,4,4]
+        [1,1,1,2,2,3,3,4]
     @test_throws ArgumentError TemporalParameter(:x,"x",0,2,[30,30],[1,1,1])
     @test_throws ArgumentError TemporalParameter(:x,"x",0,2,[30],[1])
     @test_throws ArgumentError TemporalParameter(:x,"x",0,1,[30],[1,2])
