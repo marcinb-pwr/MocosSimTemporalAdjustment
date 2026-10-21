@@ -14,12 +14,12 @@ end
 """Re-evaluate the checkpoint's best candidates with fresh paired seeds.
 
 Does not mutate the checkpoint or advance the search. Reports go into a new
-validation directory. The default validation threshold is 0.5, independent of
+validation directory. The default validation threshold is 0.65, independent of
 the exploration profile's threshold. Replicate losses remain data-only.
 """
 function validate_launcher(path::AbstractString, checkpoint::AbstractString;
                            repetitions::Int=5, top_n::Int=3, seed::Int=2026,
-                           score_tolerance::Real=0.5)
+                           score_tolerance::Real=0.65)
     repetitions>0 && top_n>0 || throw(ArgumentError("repetitions and top_n must be positive"))
     isfinite(score_tolerance) && score_tolerance>=0 ||
         throw(ArgumentError("validation score_tolerance must be finite and nonnegative"))

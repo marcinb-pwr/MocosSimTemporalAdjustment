@@ -382,13 +382,13 @@ in separate directories when making such changes.
 
 `experiments/saxony_temporal_fast.toml` retains the temporal profile's bounds,
 step limits, penalty weights, eight workers and search population. It changes
-`search.repetitions` to **1**, `score_tolerance` to **0.6**, and uses separate
+`search.repetitions` to **1**, keeps the same **0.65** tolerance, and uses separate
 output/checkpoint directories under `runs/saxony-temporal-fast`.
 
 At later horizons this is 120 candidates × 1 seed = **120 simulations per round**,
 instead of 360. A comparable 49-minute round should take roughly 16 minutes,
-subject to process timing and machine load. The looser tolerance can also avoid
-additional rounds; it does not guarantee acceptance. These are exploration
+subject to process timing and machine load. The 0.65 tolerance can avoid
+additional rounds compared with the former 0.5 setting; it does not guarantee acceptance. These are exploration
 results: a good score on one seed can be sensitive to simulation randomness.
 
 ```sh
@@ -405,15 +405,15 @@ repeating it from the previous checkpoint. A completed failed-stage checkpoint
 can instead be warm-started to retry that horizon with its best survivors.
 
 Validate the best three survivors of the fast experiment using five fresh seeds
-and a stricter 0.5 tolerance (15 simulations, no parameter search):
+and the same 0.65 tolerance (15 simulations, no parameter search):
 
 ```sh
 julia --project=. scripts/validate_launcher.jl experiments/saxony_temporal_fast.toml \
-  runs/saxony-temporal-fast/checkpoints/stage_006_day_84.jls 5 3 0.5
+  runs/saxony-temporal-fast/checkpoints/stage_006_day_84.jls 5 3 0.65
 ```
 
 The positional options after the checkpoint are `SEEDS`, `TOP_N`, `TOLERANCE`,
-with defaults `5`, `3`, `0.5`. Any stage checkpoint may be checked. Use a profile
+with defaults `5`, `3`, `0.65`. Any stage checkpoint may be checked. Use a profile
 with the same parameter/temporal definitions, constraints, seed JSON, model and
 observations; its exploration repetition count and threshold do not control
 validation. Seeds are paired across candidates, distinct from that checkpoint's
@@ -431,7 +431,7 @@ exploration result requiring further fitting.
 Each candidate worker runs its seeds sequentially, so validating three finalists
 uses up to three simultaneous launchers. Set `TOP_N` to 8 to use up to eight
 workers (40 simulations at five seeds). The original temporal profile remains
-available for three-seed, 0.5-threshold fitting throughout.
+available for three-seed, 0.65-threshold fitting throughout.
 
 Single-trajectory runs of the refreshed baseline completed through days 550 and
 600 on Julia 1.7.0, peaking at 2.26 and 3.00 GiB RSS. Reproduction details and

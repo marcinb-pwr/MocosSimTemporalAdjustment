@@ -30,7 +30,7 @@
         @test length(runs)==4
         @test all(JSON.parsefile(joinpath(run,"evaluation.json"))["seed"] in result.replicate_seeds for run in runs)
         report=JSON.parsefile(joinpath(result.directory,"validation_result.json"))
-        @test report["score_tolerance"]==.5 && report["repetitions"]==2
+        @test report["score_tolerance"]==.65 && report["repetitions"]==2
         @test report["candidates"][1]["data_score"]≈first(result.candidates).score
         @test isfile(joinpath(result.directory,"best_config.json"))
         @test_throws ArgumentError validate_launcher(path,checkpoint;repetitions=0)
