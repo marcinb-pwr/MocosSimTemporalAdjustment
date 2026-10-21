@@ -300,6 +300,17 @@ For later continuations of that temporal experiment, use `--resume`, not
 and breakpoints in addition to the existing parameter/search checks. It assumes
 the same launcher/model, observations and remaining seed configuration.
 
+Single-trajectory runs of the refreshed baseline completed through days 550 and
+600 on Julia 1.7.0, peaking at 2.26 and 3.00 GiB RSS. Reproduction details and
+measured results are in [`experiments/omicron_smoke_results.json`](experiments/omicron_smoke_results.json).
+These establish runtime stability for one seed, not a calibrated Omicron fit.
+The tested launcher's daily exporter reconstructs infections from final
+per-person records and keeps one detection timestamp per person. Reinfections
+can therefore change historical exported counts: extending the same-seed run
+from 550 to 600 days changed earlier infection/detection series, while the death
+and hospitalization prefixes matched. Event-based daily incidence accounting in
+MocosSimLauncher needs to be addressed before interpreting long-run fit scores.
+
 ### Measure memory for 4, 6 and 8 workers
 
 Use a previously generated `config_candidate.json` containing absolute input

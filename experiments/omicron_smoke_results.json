@@ -1,0 +1,128 @@
+{
+  "baseline_commit": "53aaeb5",
+  "optimizer_commit": "158f92c",
+  "launcher_commit": "4c0149d0f3a5037acd51a4c9f08e510e4414e920",
+  "mocossim_commit": "ad945c004763f544da4f80d7ea433625147c29d6",
+  "julia": "1.7.0",
+  "jld2": "0.4.55",
+  "host": "Linux, 4 CPU quota, 16 GiB cgroup memory",
+  "params_seed": 430638884,
+  "threads": 1,
+  "num_trajectories": 1,
+  "input_changes": "Only local input paths, params_seed, horizon and trajectory count; baseline epidemiological settings preserved.",
+  "scoring": "Equal weights for repository gt/daily_age_total_detections.csv and gt/daily_age_total_deaths.csv, trailing 7-day means, default normalization.",
+  "runs": {
+    "600": {
+      "metrics": {
+        "daily_detections": {
+          "length": 600,
+          "peak": 33169,
+          "total": 1996793
+        },
+        "daily_hospitalizations": {
+          "length": 600,
+          "peak": 1592,
+          "total": 99136
+        },
+        "daily_infections": {
+          "length": 600,
+          "peak": 40027,
+          "total": 2612020
+        },
+        "daily_deaths": {
+          "length": 600,
+          "peak": 141,
+          "total": 9509
+        }
+      },
+      "score": 2.1612063990496972,
+      "metric_scores": {
+        "daily_detections": 2.8971536368014563,
+        "daily_deaths": 1.4252591612979382
+      },
+      "resources": {
+        "days": 600,
+        "peak_total_rss_gib": 2.996051788330078,
+        "status": "completed",
+        "exit_codes": [
+          0
+        ],
+        "workers": 1,
+        "peak_individual_rss_gib": 2.996051788330078,
+        "elapsed_seconds": 268.3721487039875
+      }
+    },
+    "550": {
+      "metrics": {
+        "daily_detections": {
+          "length": 550,
+          "peak": 35085,
+          "total": 1875289
+        },
+        "daily_hospitalizations": {
+          "length": 550,
+          "peak": 1592,
+          "total": 92388
+        },
+        "daily_infections": {
+          "length": 550,
+          "peak": 44189,
+          "total": 2430875
+        },
+        "daily_deaths": {
+          "length": 550,
+          "peak": 141,
+          "total": 9040
+        }
+      },
+      "score": 2.7640595138242006,
+      "metric_scores": {
+        "daily_detections": 4.0965919693445745,
+        "daily_deaths": 1.4315270583038264
+      },
+      "resources": {
+        "days": 550,
+        "peak_total_rss_gib": 2.2611541748046875,
+        "status": "completed",
+        "exit_codes": [
+          0
+        ],
+        "workers": 1,
+        "peak_individual_rss_gib": 2.2611541748046875,
+        "elapsed_seconds": 228.71835208398988
+      }
+    }
+  },
+  "prefix_comparison": {
+    "daily_detections": {
+      "first_differing_day": 4,
+      "differing_days": 542,
+      "day550_total": 1875289,
+      "day600_prefix550_total": 1773159
+    },
+    "daily_hospitalizations": {
+      "first_differing_day": null,
+      "differing_days": 0,
+      "day550_total": 92388,
+      "day600_prefix550_total": 92388
+    },
+    "daily_infections": {
+      "first_differing_day": 1,
+      "differing_days": 548,
+      "day550_total": 2430875,
+      "day600_prefix550_total": 2186436
+    },
+    "daily_deaths": {
+      "first_differing_day": null,
+      "differing_days": 0,
+      "day550_total": 9040,
+      "day600_prefix550_total": 9040
+    }
+  },
+  "limitations": [
+    "One seed per horizon; runtime stability does not establish calibration quality or general stability.",
+    "Nonfatal contact-duration and JLD2-format warnings were emitted.",
+    "Current launcher exporter reconstructs infections from each persons final backwardinfection record and stores one detection timestamp per person; reinfections can change historical exported counts. Scores and totals refer to this exporter, not validated incident event counts.",
+    "Omicron imports configured at day 455; daily strain-specific output is disabled in this launcher, so these outputs alone do not establish strain-specific incidence."
+  ]
+}
