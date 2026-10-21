@@ -152,6 +152,7 @@ struct LauncherEvaluator
     integer_parameters::Set{Symbol}
     targets::Vector{MetricTarget}
     smoothing_days::Int
+    active_processes::IdDict{Task,Any}
 end
 
 function LauncherEvaluator(config::LauncherConfig, parameter_paths::AbstractDict,
@@ -184,7 +185,18 @@ function LauncherEvaluator(config::LauncherConfig, parameter_paths::AbstractDict
     end
     integers = Set(Symbol.(integer_parameters))
     issubset(integers, Set(keys(paths))) || throw(ArgumentError("unknown integer parameter"))
-    LauncherEvaluator(config, base, paths, integers, targets, smoothing_days)
+    LauncherEvaluator(config, base, paths, integers, targets, smoothing_days, IdDict{Task,Any}())
+end
+
+function _cancel_evaluations(evaluator::LauncherEvaluator)
+    for process in values(evaluator.active_processes)
+        try
+            process_exited(process) || kill(process, Base.SIGKILL)
+        catch
+            # A process may exit between the check and kill. Its worker owns wait/cleanup.
+        end
+    end
+    nothing
 end
 
 """Make the exact JSON object used for one full-prefix launcher run."""
@@ -324,6 +336,7 @@ function (evaluator::LauncherEvaluator)(values, horizon, seed)
         open(joinpath(directory, "stdout.log"), "w") do stdout_io
             open(joinpath(directory, "stderr.log"), "w") do stderr_io
                 process = run(pipeline(cmd; stdout=stdout_io, stderr=stderr_io); wait=false)
+                evaluator.active_processes[current_task()] = process
                 try
                     status = timedwait(() -> process_exited(process), config.timeout_seconds; pollint=min(0.1, config.timeout_seconds))
                     if status == :timed_out
@@ -335,9 +348,13 @@ function (evaluator::LauncherEvaluator)(values, horizon, seed)
                     report["timed_out"] && error("launcher timed out")
                     success(process) || error("launcher exited with code $(process.exitcode)")
                 finally
-                    if !process_exited(process)
-                        kill(process, Base.SIGKILL)
-                        wait(process)
+                    try
+                        if !process_exited(process)
+                            kill(process, Base.SIGKILL)
+                            wait(process)
+                        end
+                    finally
+                        delete!(evaluator.active_processes, current_task())
                     end
                 end
             end

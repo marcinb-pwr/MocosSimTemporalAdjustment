@@ -6,12 +6,19 @@ base_config = "${MOCOSSIM_SEED_CONFIG}"
 # Input paths inside the seed JSON are relative to the seed JSON's directory.
 # Set input_base_dir explicitly if the seed was authored relative to another directory.
 output_dir = "../runs/launcher-fit"
-threads = 4
+# One trajectory is simulated by one thread. More threads allocate extra simulation states.
+threads = 1
 num_trajectories = 1
 timeout_seconds = 3600.0
 compiled_modules = true
 # Keep optional summary output off for the pinned launcher/MocosSim pair.
 write_summary = false
+
+[execution]
+# Four concurrent candidates for the 8-core / 64 GB local machine.
+max_workers = 4
+progress = true
+progress_interval_seconds = 30.0
 
 [search]
 start_day = 14

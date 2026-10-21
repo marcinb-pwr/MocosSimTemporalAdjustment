@@ -8,7 +8,7 @@ using JSON
 using JLD2
 using TOML
 
-export Parameter, SearchOptions, Candidate, temporal_search, load_checkpoint,
+export Parameter, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
        day_horizons, LauncherConfig, MetricTarget, LauncherEvaluator,
        load_observations, score_daily, render_candidate, fit_launcher, load_fit_config
 
@@ -99,15 +99,18 @@ function _mutate(rng, values, parameters, radius)
          for p in parameters)
 end
 
-function _evaluate(evaluator, values, horizon, seeds)
+function _evaluate(evaluator, values, horizon, seeds; on_replicate=score -> nothing)
     scores = Float64[]
     for seed in seeds
         score = Float64(evaluator(copy(values), horizon, seed))
         push!(scores, isfinite(score) ? score : Inf)
+        on_replicate(last(scores))
     end
     # A failed replicate cannot make an unreliable parameter set look better.
     Candidate(copy(values), all(isfinite, scores) ? median(scores) : Inf, horizon, scores)
 end
+
+include("execution.jl")
 
 function _distance(a, b, parameters)
     sqrt(sum((_unit(p, a[p.name]) - _unit(p, b[p.name]))^2 for p in parameters))
@@ -142,9 +145,11 @@ load_checkpoint(path::AbstractString) = open(deserialize, path)
 
 # Adapters may provide actionable diagnostics without coupling the search to their I/O.
 _evaluation_failure_hint(evaluator, horizon) = ""
+_cancel_evaluations(evaluator) = nothing
 
 """
-    temporal_search(evaluator, parameters; options=SearchOptions(), initial=[], resume_from=nothing)
+    temporal_search(evaluator, parameters; options=SearchOptions(), initial=[],
+                    resume_from=nothing, execution=ExecutionOptions())
 
 Fit progressively longer prefixes of a time series. `evaluator(values, horizon, seed)`
 must run the simulator and return a finite loss (lower is better). At each horizon,
@@ -158,11 +163,14 @@ Every completed stage is atomically serialized before the next stage begins. The
 return value is the final stage's ranked survivor vector. `resume_from` restores
 the optimizer RNG and radius after an accepted stage; search options (except
 the checkpoint directory) and parameter definitions must match.
+`execution.max_workers` bounds concurrent candidate evaluations and may change
+on resume. Proposal RNG generation and result ordering do not depend on scheduling.
 """
 function temporal_search(evaluator, parameters::Vector{Parameter};
                          options::SearchOptions=SearchOptions(),
                          initial::Vector{Dict{Symbol,Float64}}=Dict{Symbol,Float64}[],
-                         resume_from::Union{Nothing,AbstractString}=nothing)
+                         resume_from::Union{Nothing,AbstractString}=nothing,
+                         execution::ExecutionOptions=ExecutionOptions())
     _validate(parameters, options)
     for guess in initial, parameter in parameters
         haskey(guess, parameter.name) ||
@@ -208,7 +216,8 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                     push!(proposals, _mutate(rng, parent, parameters, radius))
                 end
             end
-            candidates = [_evaluate(evaluator, values, horizon, seeds) for values in proposals]
+            candidates = _evaluate_candidates(evaluator, proposals, horizon, seeds, execution;
+                                             round=round, max_rounds=options.max_rounds_per_horizon)
             survivors = _select(candidates, options.survivors, options.min_separation, parameters)
             parents = [copy(candidate.values) for candidate in survivors]
             options.score_tolerance !== nothing &&

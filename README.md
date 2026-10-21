@@ -1,8 +1,8 @@
 # MocosSimTemporalAdjustment
 
 Fit MocosSim parameters to progressively longer day prefixes, keeping several
-plausible candidates at each step. Runs sequentially and invokes
-MocosSimLauncher in a separate Julia process. Tested with Julia **1.7.0** and
+plausible candidates at each step. Uses a bounded candidate queue and invokes
+MocosSimLauncher in separate Julia processes. Tested with Julia **1.7.0** and
 launcher branch **`mbodych/class_and_school`**, revision
 `4c0149d0f3a5037acd51a4c9f08e510e4414e920`.
 
@@ -138,8 +138,129 @@ The radius decays once per stage, with a floor of `1e-4`.
 Each later round evaluates up to `survivors * (1 + trials_per_survivor) +
 max(1, random_starts ÷ 4)` proposals, times `repetitions`. Start small when
 checking your machine; the example's larger settings can launch thousands of
-simulations. Candidate proposals are evaluated sequentially. `launcher.threads`
-controls threads **inside each launcher process**.
+simulations. `execution.max_workers` controls concurrent candidate evaluations;
+`launcher.threads` controls threads **inside each launcher process**.
+
+## Run candidates concurrently
+
+For the 8-core Intel i9 / 64 GB local machine, start with this configuration:
+
+```toml
+[launcher]
+# Other launcher paths/settings as before.
+threads = 1
+num_trajectories = 1
+
+[execution]
+max_workers = 4
+progress = true
+progress_interval_seconds = 30.0
+```
+
+At most four candidates are evaluated at once. Each worker runs its candidate's
+three repetitions sequentially, then takes the next candidate. Simulations run
+in independent processes and isolated output directories. Scoring runs in the
+optimizer as each simulation finishes. Tasks share a single scheduler thread
+for scoring/JLD2 I/O; no multithreaded access to JLD2 is introduced. This queue
+overlaps external processes and waiting; custom CPU-only Julia evaluators do
+not become CPU-parallel just by increasing the worker count.
+
+The launcher parallelizes trajectories, not the event loop within a single
+trajectory. With `num_trajectories = 1`, extra launcher threads allocate unused
+simulation states. One thread per process plus several candidate workers uses
+the machine more efficiently. Each worker still needs memory for its population,
+simulation state and events; memory usage grows with the worker limit. The
+default worker limit is one when `[execution]` is omitted. The supplied Saxony
+profile explicitly uses four workers. No `julia --threads=4` flag is required
+for the optimizer process.
+
+You will see progress such as:
+
+```text
+day=42 round=2/5 workers=4 candidates=120 runs=360
+day=42 round=2/5 completed=60/360 failed=0 elapsed_minutes=12.0 eta_minutes=60.0
+```
+
+Counts refer to individual evaluator calls (one launcher process per repetition),
+including failed runs. ETA is an estimate for the current round. It updates on
+completions, so a long run can leave the display unchanged. The queue preserves
+proposal ordering and seed assignment; results are selected after the entire
+round, using the same rules as sequential execution. It changes wall time, not
+the number of candidate simulations. Every invocation still starts a fresh
+launcher process, so Julia startup and compilation costs remain.
+
+Execution settings are separate from the serialized `SearchOptions`: existing
+stage checkpoints remain readable, and the worker count may change on resume.
+The current process cannot switch to the new queue live. To preserve a long
+running fit, let the current stage complete, stop before running additional
+stages if practical, and restart with `--resume` from its accepted checkpoint:
+
+```sh
+# From the repository root, after the current stage has saved its checkpoint.
+git pull --ff-only
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. scripts/fit_launcher.jl experiments/saxony_baseline.toml --resume runs/launcher-fit/checkpoints/stage_003_day_42.jls
+```
+
+Keep the existing `[search]`, parameters, observations, seed configuration and
+model version unchanged when resuming. Preserve your own TOML edits when pulling
+the updated sample profile. Mid-stage progress is not checkpointed; stopping
+during day 42 requires repeating day 42 from the day-28 checkpoint. An unmet
+mandatory-tolerance stage cannot be skipped via resume. Ctrl-C/error handling
+stops scheduling new candidates and terminates active launcher children.
+
+In the Julia API, pass `execution=ExecutionOptions(max_workers=4, progress=true)`
+to `temporal_search`. The API is quiet by default; TOML-driven fits enable
+progress by default.
+
+### Measure memory for 4, 6 and 8 workers
+
+Use a previously generated `config_candidate.json` containing absolute input
+paths. The Python 3 helper needs no extra packages and works on macOS and Linux:
+
+```sh
+python3 scripts/benchmark_launcher_memory.py runs/launcher-fit/day_42_seed_EXAMPLE/config_candidate.json \
+  --project ./MocosSimLauncher --workers 4 6 8 --days 42 \
+  --limit-gib 48 --output runs/memory-benchmark
+```
+
+Replace the example candidate directory with an actual run directory. Run this
+after stopping the fit so competing simulations do not distort the comparison.
+The output directory must be new. Use `--julia /path/to/julia` if needed.
+Each batch runs that many simulations with one thread and one trajectory per
+process, preserving the candidate's parameters and using consecutive seeds.
+JSON/CSV reports include peak aggregate RSS, peak individual RSS, elapsed time,
+and exit codes. The total is the largest simultaneous sum sampled every 0.25 s,
+not the sum of individual historical peaks. Shared pages are counted per process;
+this can overestimate physical RAM. The optimizer, other applications and OS
+memory are excluded. The default 48 GiB stop threshold leaves headroom on a
+64 GB machine; it is a sampled guard, not a hard memory limit. A stopped/failed
+batch is incomplete and prevents larger batches from starting. Longer horizons
+and different epidemic trajectories can have higher peaks, so these results
+are measurements for the tested inputs, not an upper bound for all fits.
+
+## How mutations work
+
+For each retained parent, every fitted parameter is perturbed independently:
+
+```text
+u = (value - lower) / (upper - lower)
+u_new = clamp(u + radius * randn(), 0, 1)
+value_new = lower + u_new * (upper - lower)
+```
+
+Log-scaled parameters use the corresponding normalization and inverse mapping in
+log space. One mutation changes all fitted coordinates, rather than choosing one
+coordinate. There is no crossover. The parent itself is also proposed again,
+along with fresh random candidates. Each parent generates
+`trials_per_survivor` mutations.
+
+With `initial_radius=0.20` and `radius_decay=0.75`, the radius is `0.20`, `0.15`,
+`0.1125`, ... at successive horizons. It is fixed across rounds within a stage.
+The first round at the first horizon generates random proposals (and any
+explicit initial guesses) without mutations. Clipping can produce identical
+candidates at a boundary; the current implementation does not deduplicate them
+or cache repeated parent evaluations.
 
 ## Score and parameter mappings
 

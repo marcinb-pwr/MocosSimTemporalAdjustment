@@ -101,6 +101,8 @@ function fixture_project(directory)
     write(script, raw"""
 using JSON, JLD2
 config = JSON.parsefile(ARGS[1])
+started = time()
+sleep(Float64(get(config, "fixture_pause", 0.0)))
 mode = get(config, "fixture_mode", "ok")
 mode == "timeout" && sleep(30)
 mode == "exit" && (println(stderr, "fixture launcher dependency error"); exit(3))
@@ -121,6 +123,9 @@ if summary !== nothing
     jldopen(summary, "w") do file
         file["num_infections"] = zeros(Int, n)
     end
+end
+open(joinpath(dirname(ARGS[1]), "worker_timing.json"), "w") do io
+    JSON.print(io, Dict("started"=>started, "finished"=>time(), "pid"=>getpid()))
 end
 """)
     write(joinpath(directory, "population.jld2"), "fixture input")

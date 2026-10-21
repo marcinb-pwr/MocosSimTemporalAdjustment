@@ -16,7 +16,7 @@ end
 function load_fit_config(path::AbstractString)
     raw = TOML.parsefile(path)
     base = dirname(abspath(path))
-    _reject_unknown(raw, ["launcher", "search", "parameters", "metrics", "scoring"], "top-level")
+    _reject_unknown(raw, ["launcher", "search", "parameters", "metrics", "scoring", "execution"], "top-level")
     launcher = copy(raw["launcher"])
     _reject_unknown(launcher, fieldnames(LauncherConfig), "launcher")
     for key in ("project_dir", "base_config", "advanced_cli", "output_dir", "input_base_dir")
@@ -41,6 +41,10 @@ function load_fit_config(path::AbstractString)
     search["checkpoint_dir"] = haskey(search, "checkpoint_dir") ?
         _config_path(base, search["checkpoint_dir"]) : joinpath(config.output_dir, "checkpoints")
     options = SearchOptions(; (Symbol(k) => v for (k,v) in search)...)
+    execution_config = copy(get(raw, "execution", Dict{String,Any}()))
+    _reject_unknown(execution_config, fieldnames(ExecutionOptions), "execution")
+    get!(execution_config, "progress", true)
+    execution = ExecutionOptions(; (Symbol(k) => v for (k,v) in execution_config)...)
     parameters = Parameter[]
     paths = Dict{Symbol,String}()
     integers = Symbol[]
@@ -68,13 +72,14 @@ function load_fit_config(path::AbstractString)
             for day in 1:min(first(options.horizons), length(target.observed))) ||
             throw(ArgumentError("$(target.name) has no usable observations at the first horizon"))
     end
-    (evaluator=evaluator, parameters=parameters, options=options)
+    (evaluator=evaluator, parameters=parameters, options=options, execution=execution)
 end
 
 """Fit a launcher TOML profile and export the best full-horizon JSON configuration."""
 function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractString}=nothing)
     fit = load_fit_config(path)
-    finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options, resume_from=resume_from)
+    finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options,
+                               resume_from=resume_from, execution=fit.execution)
     best = first(finalists)
     isfinite(best.score) || error("All final candidates failed." *
                                  _evaluation_failure_hint(fit.evaluator, best.horizon))
