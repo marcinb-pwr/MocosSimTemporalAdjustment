@@ -271,6 +271,21 @@ School, class, and age coupling keep their existing mutation/radius rules. They
 are global parameters, so changing them can affect earlier days even when older
 temporal entries are frozen.
 
+Re-evaluated parents are intentionally unchanged. Immediately after warm start
+from a scalar checkpoint, the first 12 retained candidates still contain the
+baseline temporal vectors; the 12 random candidates and 96 mutations can vary
+the active entries. Each candidate has three repetitions, so a few early output
+directories with unchanged vectors are expected. The scalar-only
+`saxony_baseline.toml --resume ...` command keeps temporal vectors fixed for
+**every** candidate. Switch to the temporal profile with `--warm-start` to add
+those parameters.
+
+Normal progress identifies the loaded profile and whether temporal fitting is
+enabled. For temporal rounds it also prints retained/random/mutated proposal
+counts, each active interval, and its proposed minimum, maximum and number of
+distinct values before simulations start. Each `evaluation.json` records
+`fitted_parameters`; a scalar-only run lists just the three scalar values.
+
 Start a fresh temporal experiment with:
 
 ```sh

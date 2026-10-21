@@ -53,6 +53,16 @@
         @test all(v[:infection_modulation_1] == defaults[:infection_modulation_1] &&
                   v[:infection_modulation_3] == defaults[:infection_modulation_3]
                   for v in calls[56])
+        proposals = calls[56][1:options.repetitions:end]
+        active = [MTA._temporal_name(t, MTA._temporal_index(t,56)) for t in temporal]
+        @test all(all(v[k] == defaults[k] for k in active)
+                  for v in proposals[1:options.survivors])
+        @test all(any(v[k] != defaults[k] for v in proposals[options.survivors+1:end]) for k in active)
+        progress = IOBuffer()
+        MTA._report_temporal_proposals(progress,temporal,proposals,56,1,3,1)
+        log = String(take!(progress))
+        @test occursin("retained=3 random=1 mutated=6",log)
+        @test occursin("temporal=infection_modulation_2 interval=[30.0,60.0)",log)
         @test isfinite(first(warm).score)
         saved = load_checkpoint(joinpath(directory,"stage_007_day_90.jls"))
         @test saved.temporal == temporal && saved.warm_start_from == checkpoint

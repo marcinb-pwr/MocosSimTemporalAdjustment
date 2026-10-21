@@ -53,3 +53,19 @@ function _mutate_proposal(rng, parent, parameters, radius, temporal)
     isempty(temporal) && return _mutate(rng, parent, parameters, radius)
     merge(copy(parent), _mutate(rng, parent, parameters, radius))
 end
+
+function _report_temporal_proposals(io, temporal, proposals, horizon, round, parent_count, random_count)
+    isempty(temporal) && return
+    mutated = length(proposals) - parent_count - random_count
+    println(io, "day=$horizon round=$round retained=$parent_count random=$random_count mutated=$mutated")
+    for t in temporal
+        index = _temporal_index(t, horizon)
+        name = _temporal_name(t, index)
+        values = [p[name] for p in proposals]
+        lower = index == 1 ? 0.0 : t.times[index-1]
+        upper = index > length(t.times) ? Inf : t.times[index]
+        println(io, "day=$horizon round=$round temporal=$name interval=[$lower,$upper) ",
+                "proposed_min=$(minimum(values)) proposed_max=$(maximum(values)) ",
+                "distinct=$(length(unique(values)))")
+    end
+end

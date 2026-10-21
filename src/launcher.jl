@@ -329,6 +329,7 @@ function (evaluator::LauncherEvaluator)(values, horizon, seed)
     cmd = _launcher_command(config, config_path, daily_path, summary_path)
     report = Dict{String,Any}("status" => "failed", "score" => nothing,
         "horizon" => horizon, "seed" => seed, "command" => collect(cmd),
+        "fitted_parameters" => Dict(String(k) => v for (k,v) in values),
         "working_directory" => config.project_dir, "timeout_seconds" => config.timeout_seconds,
         "timed_out" => false, "exit_code" => nothing)
     score = Inf

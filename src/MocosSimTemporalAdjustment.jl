@@ -247,6 +247,8 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                     push!(proposals, _mutate_proposal(rng, parent, active_parameters, radius, temporal))
                 end
             end
+            execution.progress && _report_temporal_proposals(stderr, temporal, proposals,
+                horizon, round, length(parents), random_count)
             candidates = _evaluate_candidates(evaluator, proposals, horizon, seeds, execution;
                                              round=round, max_rounds=options.max_rounds_per_horizon)
             survivors = _select(candidates, options.survivors, options.min_separation, active_parameters)

@@ -107,6 +107,12 @@ end
 function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractString}=nothing,
                       warm_start_from::Union{Nothing,AbstractString}=nothing)
     fit = load_fit_config(path)
+    if fit.execution.progress
+        println(stderr, "Fit profile: ", abspath(path))
+        println(stderr, "Temporal fitting: ", isempty(fit.temporal) ?
+            "disabled (no [[temporal_parameters]] entries)" :
+            join(string.(getfield.(fit.temporal, :name)), ", "))
+    end
     finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options,
                                resume_from=resume_from, warm_start_from=warm_start_from,
                                temporal=fit.temporal, execution=fit.execution)

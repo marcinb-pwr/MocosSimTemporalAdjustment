@@ -13,6 +13,7 @@ if length(ARGS) == 2
     println("Score tolerance: ", fit.options.score_tolerance)
     println("Candidate workers: ", fit.execution.max_workers)
     println("Threads per launcher: ", fit.evaluator.config.threads)
+    println("Temporal fitting: ", isempty(fit.temporal) ? "disabled" : "enabled")
     for t in fit.temporal, day in fit.options.horizons
         i = MocosSimTemporalAdjustment._temporal_index(t, day)
         println("Day $day: $(t.name) interval_values[$i]")

@@ -153,6 +153,7 @@ end
         directories = readdir(config.output_dir; join=true)
         report = JSON.parsefile(joinpath(only(directories), "evaluation.json"))
         @test report["status"] == "completed" && report["exit_code"] == 0
+        @test report["fitted_parameters"] == Dict("school"=>0.25)
         @test JSON.parsefile(joinpath(only(directories), "config_candidate.json"))["params_seed"] == 37
         for mode in ("exit", "missing", "malformed", "timeout")
             seed["fixture_mode"] = mode
