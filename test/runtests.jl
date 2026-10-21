@@ -28,6 +28,7 @@ end
 
 include("launcher.jl")
 include("execution.jl")
+include("temporal.jl")
 
 @testset "validation and failed simulations" begin
     @test_throws ArgumentError Parameter(:bad, 0, 1; scale=:log)

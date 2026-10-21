@@ -16,7 +16,7 @@ end
 function load_fit_config(path::AbstractString)
     raw = TOML.parsefile(path)
     base = dirname(abspath(path))
-    _reject_unknown(raw, ["launcher", "search", "parameters", "metrics", "scoring", "execution"], "top-level")
+    _reject_unknown(raw, ["launcher", "search", "parameters", "temporal_parameters", "metrics", "scoring", "execution"], "top-level")
     launcher = copy(raw["launcher"])
     _reject_unknown(launcher, fieldnames(LauncherConfig), "launcher")
     for key in ("project_dir", "base_config", "advanced_cli", "output_dir", "input_base_dir")
@@ -42,6 +42,11 @@ function load_fit_config(path::AbstractString)
         _config_path(base, search["checkpoint_dir"]) : joinpath(config.output_dir, "checkpoints")
     options = SearchOptions(; (Symbol(k) => v for (k,v) in search)...)
     execution_config = copy(get(raw, "execution", Dict{String,Any}()))
+    if haskey(execution_config, "batch_size")
+        haskey(execution_config, "max_workers") &&
+            throw(ArgumentError("use execution.batch_size OR execution.max_workers, not both"))
+        execution_config["max_workers"] = pop!(execution_config, "batch_size")
+    end
     _reject_unknown(execution_config, fieldnames(ExecutionOptions), "execution")
     get!(execution_config, "progress", true)
     execution = ExecutionOptions(; (Symbol(k) => v for (k,v) in execution_config)...)
@@ -54,6 +59,29 @@ function load_fit_config(path::AbstractString)
         push!(parameters, Parameter(name, item["lower"], item["upper"]; scale=Symbol(get(item, "scale", "linear"))))
         paths[name] = String(item["path"])
         get(item, "integer", false) && push!(integers, name)
+    end
+    temporal = TemporalParameter[]
+    baseline = JSON.parsefile(config.base_config)
+    for item in get(raw, "temporal_parameters", [])
+        _reject_unknown(item, ["name", "path", "lower", "upper", "scale"], "temporal parameter")
+        root = String(item["path"])
+        root in ("infection_modulation", "mild_detection_modulation", "tracing_modulation") ||
+            throw(ArgumentError("unsupported temporal modulation: $root"))
+        modulation = get(baseline, root, nothing)
+        modulation isa AbstractDict && get(modulation, "function", nothing) == "IntervalsModulations" ||
+            throw(ArgumentError("$root must use IntervalsModulations"))
+        params = modulation["params"]
+        get(params, "weight_days", 0) == 1 && get(params, "weight_detected", 0) == 0 &&
+            get(params, "weight_deaths", 0) == 0 ||
+            throw(ArgumentError("$root must be day-based: weight_days=1, weight_detected=weight_deaths=0"))
+        t = TemporalParameter(Symbol(get(item, "name", root)), "$root.params.interval_values",
+            item["lower"], item["upper"], params["interval_times"], params["interval_values"];
+            scale=Symbol(get(item, "scale", "linear")))
+        push!(temporal, t)
+        append!(parameters, _temporal_parameters([t]))
+        for i in eachindex(t.values)
+            paths[_temporal_name(t, i)] = "$(t.path)[$i]"
+        end
     end
     _validate(parameters, options)
     targets = MetricTarget[]
@@ -72,14 +100,16 @@ function load_fit_config(path::AbstractString)
             for day in 1:min(first(options.horizons), length(target.observed))) ||
             throw(ArgumentError("$(target.name) has no usable observations at the first horizon"))
     end
-    (evaluator=evaluator, parameters=parameters, options=options, execution=execution)
+    (evaluator=evaluator, parameters=parameters, options=options, execution=execution, temporal=temporal)
 end
 
 """Fit a launcher TOML profile and export the best full-horizon JSON configuration."""
-function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractString}=nothing)
+function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractString}=nothing,
+                      warm_start_from::Union{Nothing,AbstractString}=nothing)
     fit = load_fit_config(path)
     finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options,
-                               resume_from=resume_from, execution=fit.execution)
+                               resume_from=resume_from, warm_start_from=warm_start_from,
+                               temporal=fit.temporal, execution=fit.execution)
     best = first(finalists)
     isfinite(best.score) || error("All final candidates failed." *
                                  _evaluation_failure_hint(fit.evaluator, best.horizon))

@@ -213,6 +213,93 @@ In the Julia API, pass `execution=ExecutionOptions(max_workers=4, progress=true)
 to `temporal_search`. The API is quiet by default; TOML-driven fits enable
 progress by default.
 
+`execution.batch_size` is an alias for `execution.max_workers`. Use either name,
+not both. For example, `[execution] batch_size = 8` permits eight concurrent
+candidate simulations. This setting belongs in the **fit TOML**, since the
+optimizer owns the queue. `launcher.threads = 1` still controls each simulation.
+
+## Fit only the current temporal interval
+
+`experiments/saxony_temporal.toml` extends the scalar Saxony profile with all
+three modulation vectors and eight candidate workers. The scalar-only profile
+is retained so existing experiments can continue with exact resume.
+
+```toml
+[[temporal_parameters]]
+path = "infection_modulation"
+lower = 0.05
+upper = 1.50
+
+[[temporal_parameters]]
+path = "mild_detection_modulation"
+lower = 0.05
+upper = 1.00
+
+[[temporal_parameters]]
+path = "tracing_modulation"
+lower = 0.05
+upper = 1.50
+```
+
+Bounds are editable search choices, not calibrated confidence intervals. All
+baseline entries must be within their vector's bounds. The vectors and their
+breakpoints come from the launcher's seed JSON; they are not replaced with a new
+grid. The modulation must be `IntervalsModulations`, with `weight_days=1` and
+both case/death weights zero, so that its input is the simulation day.
+
+MocosSim uses `searchsortedlast(interval_times, day) + 1` (one-based indexing):
+
+| Horizon | Active interval with 30-day breakpoints | Fitted vector entry |
+| --- | --- | --- |
+| 14, 28 | `[0,30)` | `interval_values[1]` |
+| 42, 56 | `[30,60)` | `interval_values[2]` |
+| 60, 70, 84 | `[60,90)` | `interval_values[3]` |
+| 90 | `[90,120)` | `interval_values[4]` |
+
+Only the interval containing the **current horizon** is changed, even if a stage
+spans several intervals. At an exact boundary the new interval is active,
+matching the simulator. Earlier entries remain frozen within each survivor's
+history; future entries retain baseline values until their interval becomes
+active. A new random proposal inherits one survivor's history and randomizes
+only its active temporal entries and scalar parameters. Mutations also change
+only active entries and scalars. Retained parents are re-evaluated as before.
+The three vectors can use different breakpoints. Diversity is measured over the
+currently fitted entries and scalars. The score still covers the full prefix
+from day zero, and each simulation reruns that prefix.
+
+School, class, and age coupling keep their existing mutation/radius rules. They
+are global parameters, so changing them can affect earlier days even when older
+temporal entries are frozen.
+
+Start a fresh temporal experiment with:
+
+```sh
+julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal.toml --check
+julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal.toml
+```
+
+To carry the uploaded scalar-only day-42 survivors into a **new experiment**:
+
+```sh
+# The new profile writes to runs/saxony-temporal, preserving the original fit.
+julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal.toml \
+  --warm-start runs/launcher-fit/checkpoints/stage_003_day_42.jls
+```
+
+Warm start preserves scalar survivor values, the optimizer RNG and next radius,
+then starts at the next horizon (day 56 in this example). Temporal values begin
+with the current seed JSON's baseline; earlier intervals were not retrospectively
+fitted. Old scores are not reused for subsequent stages. Scalar parameter
+definitions and search settings must match the checkpoint, except output paths
+and an optional extension of the unfinished horizon schedule. The completed
+horizon prefix must match. Use separate output/checkpoint directories to retain
+the previous experiment. Changing the baseline also makes this a new experiment.
+
+For later continuations of that temporal experiment, use `--resume`, not
+`--warm-start`. Exact resume checks temporal definitions, baseline vector values
+and breakpoints in addition to the existing parameter/search checks. It assumes
+the same launcher/model, observations and remaining seed configuration.
+
 ### Measure memory for 4, 6 and 8 workers
 
 Use a previously generated `config_candidate.json` containing absolute input

@@ -8,7 +8,7 @@ using JSON
 using JLD2
 using TOML
 
-export Parameter, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
+export Parameter, TemporalParameter, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
        day_horizons, LauncherConfig, MetricTarget, LauncherEvaluator,
        load_observations, score_daily, render_candidate, fit_launcher, load_fit_config
 
@@ -99,6 +99,8 @@ function _mutate(rng, values, parameters, radius)
          for p in parameters)
 end
 
+include("temporal.jl")
+
 function _evaluate(evaluator, values, horizon, seeds; on_replicate=score -> nothing)
     scores = Float64[]
     for seed in seeds
@@ -170,7 +172,13 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                          options::SearchOptions=SearchOptions(),
                          initial::Vector{Dict{Symbol,Float64}}=Dict{Symbol,Float64}[],
                          resume_from::Union{Nothing,AbstractString}=nothing,
+                         warm_start_from::Union{Nothing,AbstractString}=nothing,
+                         temporal::Vector{TemporalParameter}=TemporalParameter[],
                          execution::ExecutionOptions=ExecutionOptions())
+    resume_from !== nothing && warm_start_from !== nothing &&
+        throw(ArgumentError("resume_from and warm_start_from are mutually exclusive"))
+    isempty(temporal) || all(p -> p in parameters, _temporal_parameters(temporal)) ||
+        throw(ArgumentError("parameters must include all expanded temporal entries"))
     _validate(parameters, options)
     for guess in initial, parameter in parameters
         haskey(guess, parameter.name) ||
@@ -183,25 +191,48 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
     radius = options.initial_radius
     first_stage = 1
     survivors = Candidate[]
-    if resume_from !== nothing
+    checkpoint_path = resume_from === nothing ? warm_start_from : resume_from
+    if checkpoint_path !== nothing
         isempty(initial) || throw(ArgumentError("initial and resume_from are mutually exclusive"))
-        saved = load_checkpoint(resume_from)
+        saved = load_checkpoint(checkpoint_path)
         hasproperty(saved, :schema_version) && saved.schema_version == 1 ||
             throw(ArgumentError("checkpoint does not support exact resume"))
-        isequal(saved.parameters, parameters) || throw(ArgumentError("resume parameters differ"))
+        if warm_start_from === nothing
+            isequal(saved.parameters, parameters) || throw(ArgumentError("resume parameters differ; use warm_start_from to add temporal vectors"))
+            isequal(get(saved, :temporal, TemporalParameter[]), temporal) ||
+                throw(ArgumentError("resume temporal definitions differ"))
+        else
+            !isempty(temporal) && isempty(get(saved, :temporal, TemporalParameter[])) ||
+                throw(ArgumentError("warm start supports adding temporal vectors to a scalar-only checkpoint"))
+            temporal_names = Set(p.name for p in _temporal_parameters(temporal))
+            isequal(saved.parameters, [p for p in parameters if !(p.name in temporal_names)]) ||
+                throw(ArgumentError("warm start scalar parameters differ"))
+        end
+        if warm_start_from !== nothing
+            length(options.horizons) >= saved.stage &&
+                options.horizons[1:saved.stage] == saved.options.horizons[1:saved.stage] ||
+                throw(ArgumentError("warm start must preserve the completed horizon prefix"))
+        end
         all(isequal(getfield(saved.options, k), getfield(options, k))
-            for k in fieldnames(SearchOptions) if k != :checkpoint_dir) ||
+            for k in fieldnames(SearchOptions)
+            if k != :checkpoint_dir && !(warm_start_from !== nothing && k == :horizons)) ||
             throw(ArgumentError("resume search options differ"))
         saved.accepted || throw(ArgumentError("cannot resume past a stage that failed its tolerance"))
         rng = deepcopy(saved.rng)
         parents = [copy(c.values) for c in saved.survivors]
+        if warm_start_from !== nothing
+            parents = [merge(_temporal_defaults(temporal), parent) for parent in parents]
+        end
         radius = saved.next_radius
         first_stage = saved.stage + 1
         survivors = saved.survivors
+        warm_start_from !== nothing && first_stage > length(options.horizons) &&
+            throw(ArgumentError("warm start needs at least one remaining horizon"))
     end
 
     for (stage, horizon) in enumerate(options.horizons)
         stage < first_stage && continue
+        active_parameters = _active_parameters(parameters, temporal, horizon)
         # Paired seeds make comparisons fair across candidates and refinement rounds.
         seeds = rand(rng, 1:typemax(Int32), options.repetitions)
         rounds = 0
@@ -210,15 +241,15 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
             proposals = Dict{Symbol,Float64}[]
             append!(proposals, parents)
             random_count = stage == 1 && round == 1 ? options.random_starts : max(1, options.random_starts ÷ 4)
-            append!(proposals, (_random_values(rng, parameters) for _ in 1:random_count))
+            append!(proposals, (_random_proposal(rng, active_parameters, temporal, parents) for _ in 1:random_count))
             if stage > 1 || round > 1
                 for parent in parents, _ in 1:options.trials_per_survivor
-                    push!(proposals, _mutate(rng, parent, parameters, radius))
+                    push!(proposals, _mutate_proposal(rng, parent, active_parameters, radius, temporal))
                 end
             end
             candidates = _evaluate_candidates(evaluator, proposals, horizon, seeds, execution;
                                              round=round, max_rounds=options.max_rounds_per_horizon)
-            survivors = _select(candidates, options.survivors, options.min_separation, parameters)
+            survivors = _select(candidates, options.survivors, options.min_separation, active_parameters)
             parents = [copy(candidate.values) for candidate in survivors]
             options.score_tolerance !== nothing &&
                 first(survivors).score <= options.score_tolerance && break
@@ -230,6 +261,8 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                  next_radius=next_radius, rng=deepcopy(rng), rounds=rounds,
                  replicate_seeds=seeds, tolerance_met=met, accepted=accepted,
                  survivors=survivors, options=options, parameters=parameters)
+        isempty(temporal) || (state = merge(state, (temporal=temporal,)))
+        warm_start_from === nothing || (state = merge(state, (warm_start_from=abspath(warm_start_from),)))
         _save_checkpoint(joinpath(options.checkpoint_dir,
                                   "stage_$(lpad(stage, 3, '0'))_day_$(horizon).jls"), state)
         if !accepted
