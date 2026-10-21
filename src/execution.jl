@@ -18,7 +18,7 @@ struct ExecutionOptions
 end
 
 function _evaluate_candidates(evaluator, proposals, horizon, seeds, execution::ExecutionOptions;
-                              round::Int=1, max_rounds::Int=1)
+                              round::Int=1, max_rounds::Int=1, regularizer=(v,h)->0.0)
     isempty(proposals) && return Candidate[]
     workers = min(execution.max_workers, length(proposals))
     total = length(proposals) * length(seeds)
@@ -49,7 +49,8 @@ function _evaluate_candidates(evaluator, proposals, horizon, seeds, execution::E
         nothing
     end
     if workers == 1
-        return [_evaluate(evaluator, values, horizon, seeds; on_replicate=on_replicate)
+        return [_evaluate(evaluator, values, horizon, seeds; on_replicate=on_replicate,
+                          penalty=regularizer(values,horizon))
                 for values in proposals]
     end
     jobs = Channel{Int}(length(proposals))
@@ -68,7 +69,7 @@ function _evaluate_candidates(evaluator, proposals, horizon, seeds, execution::E
                     first_error[] === nothing || break
                     try
                         results[index] = _evaluate(evaluator, proposals[index], horizon, seeds;
-                                                   on_replicate=on_replicate)
+                            on_replicate=on_replicate,penalty=regularizer(proposals[index],horizon))
                     catch err
                         if first_error[] === nothing
                             first_error[] = err

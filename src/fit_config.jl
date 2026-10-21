@@ -16,7 +16,7 @@ end
 function load_fit_config(path::AbstractString)
     raw = TOML.parsefile(path)
     base = dirname(abspath(path))
-    _reject_unknown(raw, ["launcher", "search", "parameters", "temporal_parameters", "metrics", "scoring", "execution"], "top-level")
+    _reject_unknown(raw, ["launcher", "search", "parameters", "temporal_parameters", "temporal_constraints", "metrics", "scoring", "execution"], "top-level")
     launcher = copy(raw["launcher"])
     _reject_unknown(launcher, fieldnames(LauncherConfig), "launcher")
     for key in ("project_dir", "base_config", "advanced_cli", "output_dir", "input_base_dir")
@@ -84,6 +84,12 @@ function load_fit_config(path::AbstractString)
         end
     end
     _validate(parameters, options)
+    constraints = get(raw,"temporal_constraints",Dict{String,Any}())
+    _reject_unknown(constraints,fieldnames(TemporalControls),"temporal constraint")
+    temporal_controls = TemporalControls(; (Symbol(k)=>v for (k,v) in constraints)...)
+    isempty(temporal) && (temporal_controls.max_step !== nothing ||
+        temporal_controls.smoothness_weight>0 || temporal_controls.reversal_weight>0) &&
+        throw(ArgumentError("temporal constraints require [[temporal_parameters]] entries"))
     targets = MetricTarget[]
     for item in raw["metrics"]
         _reject_unknown(item, ["name", "file", "weight", "scale"], "metric")
@@ -100,7 +106,8 @@ function load_fit_config(path::AbstractString)
             for day in 1:min(first(options.horizons), length(target.observed))) ||
             throw(ArgumentError("$(target.name) has no usable observations at the first horizon"))
     end
-    (evaluator=evaluator, parameters=parameters, options=options, execution=execution, temporal=temporal)
+    (evaluator=evaluator, parameters=parameters, options=options, execution=execution,
+     temporal=temporal,temporal_controls=temporal_controls)
 end
 
 """Fit a launcher TOML profile and export the best full-horizon JSON configuration."""
@@ -112,10 +119,12 @@ function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractS
         println(stderr, "Temporal fitting: ", isempty(fit.temporal) ?
             "disabled (no [[temporal_parameters]] entries)" :
             join(string.(getfield.(fit.temporal, :name)), ", "))
+        isempty(fit.temporal) || println(stderr,"Temporal constraints: ",fit.temporal_controls)
     end
     finalists = temporal_search(fit.evaluator, fit.parameters; options=fit.options,
                                resume_from=resume_from, warm_start_from=warm_start_from,
-                               temporal=fit.temporal, execution=fit.execution)
+                               temporal=fit.temporal,temporal_controls=fit.temporal_controls,
+                               execution=fit.execution)
     best = first(finalists)
     isfinite(best.score) || error("All final candidates failed." *
                                  _evaluation_failure_hint(fit.evaluator, best.horizon))
@@ -127,6 +136,9 @@ function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractS
     _write_json(joinpath(fit.evaluator.config.output_dir, "best_config.json"), candidate)
     _write_json(joinpath(fit.evaluator.config.output_dir, "fit_result.json"),
         Dict("score" => best.score, "horizon" => best.horizon,
+             "data_score" => median(best.replicate_scores),
+             "temporal_regularization" => Dict(String(k)=>v for (k,v) in
+                 pairs(_temporal_penalty(best.values,fit.temporal,best.horizon,fit.temporal_controls))),
              "values" => Dict(String(k) => v for (k,v) in best.values),
              "replicate_scores" => best.replicate_scores,
              "replicate_seeds" => checkpoint.replicate_seeds,

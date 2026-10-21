@@ -8,7 +8,7 @@ using JSON
 using JLD2
 using TOML
 
-export Parameter, TemporalParameter, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
+export Parameter, TemporalParameter, TemporalControls, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
        day_horizons, LauncherConfig, MetricTarget, LauncherEvaluator,
        load_observations, score_daily, render_candidate, fit_launcher, load_fit_config
 
@@ -52,7 +52,8 @@ function day_horizons(; start_day::Int=14, step_days::Int=14, end_day::Int=84)
     days
 end
 
-"""One evaluated parameter set. Lower scores are better."""
+"""One evaluated parameter set. `score` includes temporal regularization;
+`replicate_scores` retain the data-only losses. Lower scores are better."""
 struct Candidate
     values::Dict{Symbol,Float64}
     score::Float64
@@ -101,7 +102,7 @@ end
 
 include("temporal.jl")
 
-function _evaluate(evaluator, values, horizon, seeds; on_replicate=score -> nothing)
+function _evaluate(evaluator, values, horizon, seeds; on_replicate=score -> nothing, penalty::Real=0)
     scores = Float64[]
     for seed in seeds
         score = Float64(evaluator(copy(values), horizon, seed))
@@ -109,7 +110,7 @@ function _evaluate(evaluator, values, horizon, seeds; on_replicate=score -> noth
         on_replicate(last(scores))
     end
     # A failed replicate cannot make an unreliable parameter set look better.
-    Candidate(copy(values), all(isfinite, scores) ? median(scores) : Inf, horizon, scores)
+    Candidate(copy(values), all(isfinite, scores) ? median(scores)+penalty : Inf, horizon, scores)
 end
 
 include("execution.jl")
@@ -151,7 +152,9 @@ _cancel_evaluations(evaluator) = nothing
 
 """
     temporal_search(evaluator, parameters; options=SearchOptions(), initial=[],
-                    resume_from=nothing, execution=ExecutionOptions())
+                    resume_from=nothing, warm_start_from=nothing,
+                    temporal=TemporalParameter[], temporal_controls=TemporalControls(),
+                    execution=ExecutionOptions())
 
 Fit progressively longer prefixes of a time series. `evaluator(values, horizon, seed)`
 must run the simulator and return a finite loss (lower is better). At each horizon,
@@ -159,7 +162,9 @@ the prior stage's survivors are re-scored, locally perturbed, and combined with
 fresh random candidates. Repeat up to `max_rounds_per_horizon` rounds, stopping
 early when the best score reaches `score_tolerance` (when configured). If a
 mandatory tolerance is missed, save the stage and stop before the next horizon.
-All replicates must be finite; successful replicate scores use their median.
+All replicates must be finite. The candidate score is their median plus temporal
+regularization; stored replicate scores remain data-only. Temporal step limits
+constrain only the active interval against each survivor's preceding interval.
 
 Every completed stage is atomically serialized before the next stage begins. The
 return value is the final stage's ranked survivor vector. `resume_from` restores
@@ -174,9 +179,13 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                          resume_from::Union{Nothing,AbstractString}=nothing,
                          warm_start_from::Union{Nothing,AbstractString}=nothing,
                          temporal::Vector{TemporalParameter}=TemporalParameter[],
+                         temporal_controls::TemporalControls=TemporalControls(),
                          execution::ExecutionOptions=ExecutionOptions())
     resume_from !== nothing && warm_start_from !== nothing &&
         throw(ArgumentError("resume_from and warm_start_from are mutually exclusive"))
+    isempty(temporal) && (temporal_controls.max_step !== nothing ||
+        temporal_controls.smoothness_weight>0 || temporal_controls.reversal_weight>0) &&
+        throw(ArgumentError("temporal constraints require temporal parameters"))
     isempty(temporal) || all(p -> p in parameters, _temporal_parameters(temporal)) ||
         throw(ArgumentError("parameters must include all expanded temporal entries"))
     _validate(parameters, options)
@@ -193,7 +202,7 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
     survivors = Candidate[]
     checkpoint_path = resume_from === nothing ? warm_start_from : resume_from
     if checkpoint_path !== nothing
-        isempty(initial) || throw(ArgumentError("initial and resume_from are mutually exclusive"))
+        isempty(initial) || throw(ArgumentError("initial and a checkpoint start are mutually exclusive"))
         saved = load_checkpoint(checkpoint_path)
         hasproperty(saved, :schema_version) && saved.schema_version == 1 ||
             throw(ArgumentError("checkpoint does not support exact resume"))
@@ -201,12 +210,18 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
             isequal(saved.parameters, parameters) || throw(ArgumentError("resume parameters differ; use warm_start_from to add temporal vectors"))
             isequal(get(saved, :temporal, TemporalParameter[]), temporal) ||
                 throw(ArgumentError("resume temporal definitions differ"))
+            isequal(get(saved,:temporal_controls,TemporalControls()),temporal_controls) ||
+                throw(ArgumentError("resume temporal constraints differ; use warm_start_from for a changed experiment"))
         else
-            !isempty(temporal) && isempty(get(saved, :temporal, TemporalParameter[])) ||
-                throw(ArgumentError("warm start supports adding temporal vectors to a scalar-only checkpoint"))
+            !isempty(temporal) || throw(ArgumentError("warm start requires temporal vectors"))
+            previous_temporal = get(saved,:temporal,TemporalParameter[])
+            isempty(previous_temporal) || isequal(previous_temporal,temporal) ||
+                throw(ArgumentError("warm start temporal definitions differ"))
             temporal_names = Set(p.name for p in _temporal_parameters(temporal))
-            isequal(saved.parameters, [p for p in parameters if !(p.name in temporal_names)]) ||
-                throw(ArgumentError("warm start scalar parameters differ"))
+            old_scalars = [p for p in saved.parameters if !(p.name in temporal_names)]
+            new_scalars = [p for p in parameters if !(p.name in temporal_names)]
+            [(p.name,p.scale) for p in old_scalars] == [(p.name,p.scale) for p in new_scalars] ||
+                throw(ArgumentError("warm start scalar names/scales differ"))
         end
         if warm_start_from !== nothing
             length(options.horizons) >= saved.stage &&
@@ -222,6 +237,16 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
         parents = [copy(c.values) for c in saved.survivors]
         if warm_start_from !== nothing
             parents = [merge(_temporal_defaults(temporal), parent) for parent in parents]
+            # A warm start may tighten scalar bounds; preserve temporal history.
+            scalar_names = Set(p.name for p in new_scalars)
+            clipped = 0
+            for parent in parents, p in parameters
+                p.name in scalar_names || continue
+                value = clamp(parent[p.name],p.lower,p.upper)
+                clipped += value != parent[p.name]
+                parent[p.name] = value
+            end
+            execution.progress && println(stderr,"Warm start: scalar values clipped to new bounds=$clipped")
         end
         radius = saved.next_radius
         first_stage = saved.stage + 1
@@ -233,6 +258,7 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
     for (stage, horizon) in enumerate(options.horizons)
         stage < first_stage && continue
         active_parameters = _active_parameters(parameters, temporal, horizon)
+        parents = [_constrain_temporal!(copy(parent),temporal,horizon,temporal_controls) for parent in parents]
         # Paired seeds make comparisons fair across candidates and refinement rounds.
         seeds = rand(rng, 1:typemax(Int32), options.repetitions)
         rounds = 0
@@ -241,16 +267,19 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
             proposals = Dict{Symbol,Float64}[]
             append!(proposals, parents)
             random_count = stage == 1 && round == 1 ? options.random_starts : max(1, options.random_starts ÷ 4)
-            append!(proposals, (_random_proposal(rng, active_parameters, temporal, parents) for _ in 1:random_count))
+            append!(proposals, (_random_proposal(rng, active_parameters, temporal, parents;
+                horizon=horizon,controls=temporal_controls) for _ in 1:random_count))
             if stage > 1 || round > 1
                 for parent in parents, _ in 1:options.trials_per_survivor
-                    push!(proposals, _mutate_proposal(rng, parent, active_parameters, radius, temporal))
+                    push!(proposals, _mutate_proposal(rng, parent, active_parameters, radius, temporal;
+                        horizon=horizon,controls=temporal_controls))
                 end
             end
             execution.progress && _report_temporal_proposals(stderr, temporal, proposals,
                 horizon, round, length(parents), random_count)
             candidates = _evaluate_candidates(evaluator, proposals, horizon, seeds, execution;
-                                             round=round, max_rounds=options.max_rounds_per_horizon)
+                round=round, max_rounds=options.max_rounds_per_horizon,
+                regularizer=(v,h)->_temporal_penalty(v,temporal,h,temporal_controls).total)
             survivors = _select(candidates, options.survivors, options.min_separation, active_parameters)
             parents = [copy(candidate.values) for candidate in survivors]
             options.score_tolerance !== nothing &&
@@ -263,7 +292,7 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
                  next_radius=next_radius, rng=deepcopy(rng), rounds=rounds,
                  replicate_seeds=seeds, tolerance_met=met, accepted=accepted,
                  survivors=survivors, options=options, parameters=parameters)
-        isempty(temporal) || (state = merge(state, (temporal=temporal,)))
+        isempty(temporal) || (state = merge(state, (temporal=temporal,temporal_controls=temporal_controls)))
         warm_start_from === nothing || (state = merge(state, (warm_start_from=abspath(warm_start_from),)))
         _save_checkpoint(joinpath(options.checkpoint_dir,
                                   "stage_$(lpad(stage, 3, '0'))_day_$(horizon).jls"), state)

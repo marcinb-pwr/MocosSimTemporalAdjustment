@@ -228,7 +228,7 @@ is retained so existing experiments can continue with exact resume.
 [[temporal_parameters]]
 path = "infection_modulation"
 lower = 0.05
-upper = 1.50
+upper = 1.00
 
 [[temporal_parameters]]
 path = "mild_detection_modulation"
@@ -238,7 +238,7 @@ upper = 1.00
 [[temporal_parameters]]
 path = "tracing_modulation"
 lower = 0.05
-upper = 1.50
+upper = 1.00
 ```
 
 Bounds are editable search choices, not calibrated confidence intervals. All
@@ -271,11 +271,13 @@ School, class, and age coupling keep their existing mutation/radius rules. They
 are global parameters, so changing them can affect earlier days even when older
 temporal entries are frozen.
 
-Re-evaluated parents are intentionally unchanged. Immediately after warm start
-from a scalar checkpoint, the first 12 retained candidates still contain the
-baseline temporal vectors; the 12 random candidates and 96 mutations can vary
-the active entries. Each candidate has three repetitions, so a few early output
-directories with unchanged vectors are expected. The scalar-only
+Without temporal step constraints, re-evaluated parents are unchanged. After
+warm start from a scalar checkpoint, retained candidates begin with baseline
+temporal vectors; the 12 random candidates and 96 mutations can vary the active
+entries. With `max_step` enabled, an inherited active entry outside its allowed
+band is projected into that band before evaluation. Earlier entries stay frozen.
+Each candidate has three repetitions, so a few early output directories with
+identical temporal vectors are expected. The scalar-only
 `saxony_baseline.toml --resume ...` command keeps temporal vectors fixed for
 **every** candidate. Switch to the temporal profile with `--warm-start` to add
 those parameters.
@@ -301,19 +303,76 @@ julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal.toml \
   --warm-start runs/launcher-fit/checkpoints/stage_003_day_42.jls
 ```
 
-Warm start preserves scalar survivor values, the optimizer RNG and next radius,
+Warm start preserves scalar survivor values within the requested bounds, the optimizer RNG and next radius,
 then starts at the next horizon (day 56 in this example). Temporal values begin
 with the current seed JSON's baseline; earlier intervals were not retrospectively
-fitted. Old scores are not reused for subsequent stages. Scalar parameter
-definitions and search settings must match the checkpoint, except output paths
-and an optional extension of the unfinished horizon schedule. The completed
+fitted. Old scores are not reused for subsequent stages. Scalar names and scales
+must match; scalar bounds may change, and inherited scalar values are clipped
+to the new bounds before evaluation (the clipping count is printed). Search
+settings must match except output paths and an optional extension of the
+unfinished horizon schedule. The completed
 horizon prefix must match. Use separate output/checkpoint directories to retain
 the previous experiment. Changing the baseline also makes this a new experiment.
 
 For later continuations of that temporal experiment, use `--resume`, not
 `--warm-start`. Exact resume checks temporal definitions, baseline vector values
-and breakpoints in addition to the existing parameter/search checks. It assumes
+and breakpoints, constraints and penalty weights in addition to the existing
+parameter/search checks. To change constraints on an existing temporal
+experiment, use `--warm-start` with its accepted checkpoint and identical
+temporal definitions. That preserves earlier fitted entries; it does not repair
+old historical jumps retroactively. It assumes
 the same launcher/model, observations and remaining seed configuration.
+
+### Limit jumps and discourage reversals
+
+The supplied temporal profile includes:
+
+```toml
+[temporal_constraints]
+max_step = 0.15
+smoothness_weight = 0.20
+reversal_weight = 0.10
+```
+
+`max_step` is the main hard limit, in **absolute modulation-value units**.
+If the preceding interval's value is `0.60`, the active value must stay in
+`[0.45,0.75]`, intersected with its configured global bounds. This is relative
+to each survivor's preceding interval, not to the last mutation or iteration;
+successive rounds cannot drift beyond it. For entry 1, which has no preceding
+interval, the seed entry is the anchor. Random proposals sample inside the band;
+mutations and inherited active entries are clipped to it. Earlier and future
+entries are untouched. Omit `max_step` to retain unrestricted global bounds.
+
+Soft penalties follow the approach in
+[MocosSimCMAESOptimizer](https://github.com/marcinb-pwr/MocosSimCMAESOptimizer/blob/c07a1eb/src/MocosSimCMAESOptimizer.jl#L3325):
+
+* Smoothness is the mean absolute adjacent difference plus the mean absolute
+  change in those differences (curvature).
+* Reversal is the fraction of nonzero adjacent differences that switch sign.
+  Flat segments are skipped, so a plateau does not hide a reversal.
+
+Both terms use only entries through the currently active interval and are
+averaged across all configured temporal vectors. Future baseline values cannot
+affect the current penalty. Unlike the reference optimizer's infection-only
+extrema term, reversal control here applies to all three vectors and does not
+penalize boundary hits. A genuine turning point remains possible when the data
+fit improves enough; there is no permanent monotonicity constraint.
+
+```text
+candidate score = median(data replicate losses)
+                + smoothness_weight * smoothness
+                + reversal_weight * reversal
+```
+
+Selection and `score_tolerance` use this combined score. Per-run
+`evaluation.json` and checkpoint `replicate_scores` remain data-only;
+`fit_result.json` exposes `data_score` and `temporal_regularization` alongside
+the combined `score`. Each weight defaults to zero when omitted; set both to
+zero for only the hard step constraint. Omitting the entire section preserves
+the old unconstrained behavior. These settings do not alter school/class/age
+coupling mutation rules. Changing them requires a fresh fit or explicit warm
+start, not exact resume. Preserve the previous experiment's output/checkpoints
+in separate directories when making such changes.
 
 Single-trajectory runs of the refreshed baseline completed through days 550 and
 600 on Julia 1.7.0, peaking at 2.26 and 3.00 GiB RSS. Reproduction details and

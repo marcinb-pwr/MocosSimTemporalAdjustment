@@ -110,6 +110,14 @@ end
         @test_throws ArgumentError load_fit_config(path)
         profile["execution"]["batch_size"] = 8
         save()
+        profile["temporal_constraints"] = Dict("max_step"=>.15,"smoothness_weight"=>.2,"reversal_weight"=>.1)
+        save()
+        @test load_fit_config(path).temporal_controls.max_step == .15
+        profile["temporal_constraints"]["max_step"] = -.1
+        save()
+        @test_throws ArgumentError load_fit_config(path)
+        profile["temporal_constraints"]["max_step"] = .15
+        save()
         seed["infection_modulation"]["params"]["weight_detected"] = 1
         MTA._write_json(seed_path,seed)
         @test_throws ArgumentError load_fit_config(path)
