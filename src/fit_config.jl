@@ -116,6 +116,8 @@ function fit_launcher(path::AbstractString; resume_from::Union{Nothing,AbstractS
     fit = load_fit_config(path)
     if fit.execution.progress
         println(stderr, "Fit profile: ", abspath(path))
+        println(stderr,"Simulation seeds per candidate: ",fit.options.repetitions,
+                "; score tolerance: ",fit.options.score_tolerance)
         println(stderr, "Temporal fitting: ", isempty(fit.temporal) ?
             "disabled (no [[temporal_parameters]] entries)" :
             join(string.(getfield.(fit.temporal, :name)), ", "))

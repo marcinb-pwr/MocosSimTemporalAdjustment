@@ -309,7 +309,7 @@ with the current seed JSON's baseline; earlier intervals were not retrospectivel
 fitted. Old scores are not reused for subsequent stages. Scalar names and scales
 must match; scalar bounds may change, and inherited scalar values are clipped
 to the new bounds before evaluation (the clipping count is printed). Search
-settings must match except output paths and an optional extension of the
+settings must match except output paths, repetition count, score tolerance and an optional extension of the
 unfinished horizon schedule. The completed
 horizon prefix must match. Use separate output/checkpoint directories to retain
 the previous experiment. Changing the baseline also makes this a new experiment.
@@ -322,6 +322,10 @@ experiment, use `--warm-start` with its accepted checkpoint and identical
 temporal definitions. That preserves earlier fitted entries; it does not repair
 old historical jumps retroactively. It assumes
 the same launcher/model, observations and remaining seed configuration.
+
+If warm starting a checkpoint that failed its original tolerance, the fitter
+retries that same horizon with its survivors and original radius. It never skips
+the failed horizon. Exact resume still rejects an unaccepted stage.
 
 ### Limit jumps and discourage reversals
 
@@ -373,6 +377,61 @@ the old unconstrained behavior. These settings do not alter school/class/age
 coupling mutation rules. Changing them requires a fresh fit or explicit warm
 start, not exact resume. Preserve the previous experiment's output/checkpoints
 in separate directories when making such changes.
+
+### Fast exploration, then validate with more seeds
+
+`experiments/saxony_temporal_fast.toml` retains the temporal profile's bounds,
+step limits, penalty weights, eight workers and search population. It changes
+`search.repetitions` to **1**, `score_tolerance` to **0.6**, and uses separate
+output/checkpoint directories under `runs/saxony-temporal-fast`.
+
+At later horizons this is 120 candidates × 1 seed = **120 simulations per round**,
+instead of 360. A comparable 49-minute round should take roughly 16 minutes,
+subject to process timing and machine load. The looser tolerance can also avoid
+additional rounds; it does not guarantee acceptance. These are exploration
+results: a good score on one seed can be sensitive to simulation randomness.
+
+```sh
+julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal_fast.toml --check
+julia --project=. scripts/fit_launcher.jl experiments/saxony_temporal_fast.toml \
+  --warm-start runs/launcher-fit/checkpoints/stage_003_day_42.jls
+```
+
+Changing an already running fit's TOML has no effect on that process. Restart
+with `--warm-start`, since repetition count/tolerance changes are not exact
+resume. Use the checkpoint matching the progress you want to retain. Rounds
+within an unfinished stage are not checkpointed, so stopping such a stage means
+repeating it from the previous checkpoint. A completed failed-stage checkpoint
+can instead be warm-started to retry that horizon with its best survivors.
+
+Validate the best three survivors of the fast experiment using five fresh seeds
+and a stricter 0.5 tolerance (15 simulations, no parameter search):
+
+```sh
+julia --project=. scripts/validate_launcher.jl experiments/saxony_temporal_fast.toml \
+  runs/saxony-temporal-fast/checkpoints/stage_006_day_84.jls 5 3 0.5
+```
+
+The positional options after the checkpoint are `SEEDS`, `TOP_N`, `TOLERANCE`,
+with defaults `5`, `3`, `0.5`. Any stage checkpoint may be checked. Use a profile
+with the same parameter/temporal definitions, constraints, seed JSON, model and
+observations; its exploration repetition count and threshold do not control
+validation. Seeds are paired across candidates, distinct from that checkpoint's
+training seeds, and reproducible with validation RNG seed 2026. The Julia API
+`validate_launcher(...; seed=...)` allows another validation seed.
+
+The command prints a new validation directory containing `validation_result.json`,
+individual launcher reports and the best validated config. It re-ranks finalists
+and reports all replicate losses, their standard deviation, the median data
+score, penalties and whether each meets the validation threshold. Failed
+replicates fail the candidate. It does not edit the checkpoint, retroactively
+accept earlier stages, or advance the optimizer. A failed validation remains an
+exploration result requiring further fitting.
+
+Each candidate worker runs its seeds sequentially, so validating three finalists
+uses up to three simultaneous launchers. Set `TOP_N` to 8 to use up to eight
+workers (40 simulations at five seeds). The original temporal profile remains
+available for three-seed, 0.5-threshold fitting throughout.
 
 Single-trajectory runs of the refreshed baseline completed through days 550 and
 600 on Julia 1.7.0, peaking at 2.26 and 3.00 GiB RSS. Reproduction details and

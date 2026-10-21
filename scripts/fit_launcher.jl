@@ -11,6 +11,7 @@ if length(ARGS) == 2
     println("Horizons: ", fit.options.horizons)
     println("Parameters: ", join(string.(getfield.(fit.parameters, :name)), ", "))
     println("Score tolerance: ", fit.options.score_tolerance)
+    println("Simulation seeds per candidate: ", fit.options.repetitions)
     println("Candidate workers: ", fit.execution.max_workers)
     println("Threads per launcher: ", fit.evaluator.config.threads)
     println("Temporal fitting: ", isempty(fit.temporal) ? "disabled" : "enabled")

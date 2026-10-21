@@ -10,7 +10,7 @@ using TOML
 
 export Parameter, TemporalParameter, TemporalControls, SearchOptions, ExecutionOptions, Candidate, temporal_search, load_checkpoint,
        day_horizons, LauncherConfig, MetricTarget, LauncherEvaluator,
-       load_observations, score_daily, render_candidate, fit_launcher, load_fit_config
+       load_observations, score_daily, render_candidate, fit_launcher, load_fit_config, validate_launcher
 
 """A bounded simulation parameter. `scale` is `:linear` or `:log`."""
 struct Parameter
@@ -230,9 +230,11 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
         end
         all(isequal(getfield(saved.options, k), getfield(options, k))
             for k in fieldnames(SearchOptions)
-            if k != :checkpoint_dir && !(warm_start_from !== nothing && k == :horizons)) ||
+            if k != :checkpoint_dir && !(warm_start_from !== nothing &&
+                k in (:horizons,:repetitions,:score_tolerance))) ||
             throw(ArgumentError("resume search options differ"))
-        saved.accepted || throw(ArgumentError("cannot resume past a stage that failed its tolerance"))
+        saved.accepted || warm_start_from !== nothing ||
+            throw(ArgumentError("cannot resume past a stage that failed its tolerance"))
         rng = deepcopy(saved.rng)
         parents = [copy(c.values) for c in saved.survivors]
         if warm_start_from !== nothing
@@ -248,8 +250,11 @@ function temporal_search(evaluator, parameters::Vector{Parameter};
             end
             execution.progress && println(stderr,"Warm start: scalar values clipped to new bounds=$clipped")
         end
-        radius = saved.next_radius
-        first_stage = saved.stage + 1
+        # A changed experiment may retry a failed stage; it must not skip it.
+        radius = saved.accepted ? saved.next_radius : saved.radius
+        first_stage = saved.stage + (saved.accepted ? 1 : 0)
+        warm_start_from !== nothing && !saved.accepted && execution.progress &&
+            println(stderr,"Warm start: retrying unaccepted horizon ",saved.horizon)
         survivors = saved.survivors
         warm_start_from !== nothing && first_stage > length(options.horizons) &&
             throw(ArgumentError("warm start needs at least one remaining horizon"))
@@ -313,5 +318,6 @@ end
 
 include("launcher.jl")
 include("fit_config.jl")
+include("validation.jl")
 
 end
